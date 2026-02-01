@@ -1,0 +1,44 @@
+{
+  "name": "@point-labs/ralph",
+  "version": "0.1.0",
+  "description": "Agentic coding orchestrator with planning and execution phases",
+  "type": "module",
+  "bin": {
+    "ralph": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --outdir dist --target node",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "plan": "bun run src/cli.ts plan",
+    "run": "bun run src/cli.ts run",
+    "crank": "bun run src/cli.ts run --crank"
+  },
+  "dependencies": {
+    "effect": "^3.12.0",
+    "@effect/platform": "^0.72.0",
+    "@effect/platform-node": "^0.66.0",
+    "@effect/schema": "^0.75.0",
+    "ink": "^5.1.0",
+    "ink-text-input": "^6.0.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^18.3.0",
+    "yoga-wasm-web": "^0.3.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^18.3.0",
+    "typescript": "^5.7.0"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "ralph",
+    "effect-ts",
+    "orchestrator"
+  ],
+  "author": "Point Labs",
+  "license": "MIT"
+}
