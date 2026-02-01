@@ -4,7 +4,7 @@
  * 
  * Commands:
  *   arc plan                - Start planning UI
- *   arc run plan.json       - Execute plan (Arc mode)
+ *   arc run plan.json       - Execute plan via Pi
  *   arc run plan.json --crank  - Execute one iteration at a time
  */
 
@@ -23,30 +23,49 @@ Usage:
   arc --help                   Show this help
 
 Options:
-  --crank          Hand-crank mode: pause after each iteration
-  --max-iter <n>   Maximum iterations (default: 50)
-  --load <file>    Load existing plan for editing
+  --crank              Hand-crank mode: pause after each iteration
+  --max-iter <n>       Maximum iterations (default: 50)
+  --load <file>        Load existing plan for editing
+  --provider <name>    LLM provider (anthropic, openai, google, etc.)
+  --model <id>         Model ID to use
 
-Environment:
-  ANTHROPIC_API_KEY    Claude API key (required)
-  OPENAI_API_KEY       OpenAI API key (alternative)
-  ARC_PROVIDER         LLM provider: anthropic|openai (default: anthropic)
-  ARC_MODEL            Model override
+Execution:
+  Arc uses Pi (https://github.com/badlogic/pi-mono) as the execution engine.
+  Pi supports multiple LLM providers via API keys or OAuth subscriptions.
+
+  First time setup:
+    npm install -g @mariozechner/pi-coding-agent
+    pi
+    /login    # Authenticate with your provider
+
+Providers (OAuth subscription):
+  - Anthropic Claude Pro/Max
+  - OpenAI ChatGPT Plus/Pro (Codex)
+  - GitHub Copilot
+  - Google Gemini CLI
+
+Providers (API key):
+  - Anthropic, OpenAI, Google, xAI, Groq, Mistral, OpenRouter, etc.
 
 Examples:
-  arc plan                     Start a new planning session
-  arc plan --load plan.json    Resume planning from file
-  arc run plan.json            Execute until complete
-  arc run plan.json --crank    Execute with manual control
+  arc plan                              Start a new planning session
+  arc plan --load plan.json             Resume planning from file
+  arc run plan.json                     Execute with default provider
+  arc run plan.json --provider openai   Execute with OpenAI
+  arc run plan.json --crank             Execute with manual control
 
 Philosophy:
-  Arc implements the agentic loop pattern - a continuous loop that 
-  runs until the task is complete. Like an electric arc shaping metal,
-  or a story arc reaching its conclusion.
+  Arc orchestrates Pi in a continuous loop until the task is complete.
+  Like an electric arc shaping metal, or a story arc reaching its conclusion.
   
   Hand-crank mode lets you observe and tune the agent like a guitar.
   Each time Arc does something wrong, you adjust the prompt.
   Eventually, Arc learns all the signs.
+
+Architecture:
+  Arc (planning, orchestration)
+    → Pi (execution, tool use)
+      → LLM (Claude, GPT, Gemini, etc.)
 
 Inspired by: https://ghuntley.com/ralph
 `
@@ -57,6 +76,8 @@ interface Args {
   loadFile?: string
   crankMode: boolean
   maxIterations: number
+  provider?: string
+  model?: string
 }
 
 const parseArgs = (argv: string[]): Args => {
@@ -100,6 +121,13 @@ const parseArgs = (argv: string[]): Args => {
       case "-l":
         args.loadFile = argv[++i]
         break
+      case "--provider":
+      case "-p":
+        args.provider = argv[++i]
+        break
+      case "--model":
+        args.model = argv[++i]
+        break
       default:
         if (!arg.startsWith("-") && args.command === "help") {
           // First positional arg might be plan file
@@ -132,7 +160,7 @@ const main = async () => {
     case "run": {
       if (!args.planFile) {
         console.error("Error: Plan file required")
-        console.error("Usage: arc run <plan.json> [--crank]")
+        console.error("Usage: arc run <plan.json> [--crank] [--provider <name>] [--model <id>]")
         process.exit(1)
       }
       const { runRunCommand } = await import("./commands/run")
@@ -140,6 +168,8 @@ const main = async () => {
         runRunCommand(args.planFile, {
           crankMode: args.crankMode,
           maxIterations: args.maxIterations,
+          provider: args.provider,
+          model: args.model,
         })
       )
       break

@@ -11,8 +11,14 @@ import TextInput from "ink-text-input"
 import Spinner from "ink-spinner"
 import React, { useState, useCallback } from "react"
 import { createPlan, addStep, type Plan, type Step } from "../types/plan"
-import { LLMService, LLMServiceLive, type Message } from "../llm/service"
 import * as fs from "fs"
+
+// === LLM Types (local, for planning phase) ===
+
+interface Message {
+  role: "user" | "assistant" | "system"
+  content: string
+}
 
 // === Types ===
 

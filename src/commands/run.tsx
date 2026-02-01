@@ -1,7 +1,7 @@
 /**
  * Run Command
  * 
- * Executes a plan using the Arc loop.
+ * Executes a plan using the Arc loop with Pi as the execution engine.
  * Two modes:
  * - Continuous (arc mode): runs until complete
  * - Hand-crank: pauses after each iteration for review
@@ -14,13 +14,22 @@ import React, { useState, useEffect, useCallback, useRef } from "react"
 import * as fs from "fs"
 import type { Plan, Step } from "../types/plan"
 import { getCurrentStep, updateStep, isComplete } from "../types/plan"
-import { createEventEmitter, type ArcEvent } from "../types/events"
+import { 
+  runPiWithCallback, 
+  PiSpawnError, 
+  PiTimeoutError,
+  type PiEvent,
+  type PiRunnerConfig,
+  type PiExecutionResult,
+} from "../pi"
 
 // === Types ===
 
 interface RunConfig {
   crankMode: boolean
   maxIterations: number
+  provider?: string
+  model?: string
 }
 
 interface IterationState {
@@ -31,130 +40,179 @@ interface IterationState {
   error?: string
 }
 
+// === Prompt Builder ===
+
+const buildStepPrompt = (step: Step, plan: Plan): string => {
+  const parts: string[] = []
+
+  // Main task
+  parts.push(`Execute this task:
+${step.description}`)
+
+  // Details if present
+  if (step.details) {
+    parts.push(`Details:
+${step.details}`)
+  }
+
+  // Context files
+  if (plan.context.files?.length) {
+    parts.push(`Reference files:
+${plan.context.files.join('\n')}`)
+  }
+
+  // Notes
+  if (plan.context.notes) {
+    parts.push(`Notes:
+${plan.context.notes}`)
+  }
+
+  // Tech stack
+  if (plan.context.techStack?.length) {
+    parts.push(`Tech stack:
+${plan.context.techStack.join(', ')}`)
+  }
+
+  // Constraints
+  if (plan.context.constraints?.length) {
+    parts.push(`Constraints:
+${plan.context.constraints.map(c => `- ${c}`).join('\n')}`)
+  }
+
+  // Verification
+  if (step.verification?.command) {
+    parts.push(`When complete, this command should pass:
+${step.verification.command}`)
+  }
+
+  // Instructions
+  parts.push(`Work until the task is complete. Use the available tools (read, write, edit, bash) to accomplish it.`)
+
+  return parts.join('\n\n')
+}
+
 // === Executor ===
-
-const EXECUTOR_SYSTEM_PROMPT = `You are an expert coding agent executing a plan step by step.
-
-Current step to implement:
-{STEP_DESCRIPTION}
-
-{STEP_DETAILS}
-
-Instructions:
-1. Implement this step completely
-2. Write clean, well-documented code
-3. Run the verification command when done
-4. If verification fails, fix the issues
-
-Available tools:
-- Read files
-- Write files
-- Run shell commands
-
-Start by understanding what needs to be done, then implement it.`
 
 const executeStep = async (
   step: Step,
   plan: Plan,
+  config: RunConfig,
   onOutput: (text: string) => void
 ): Promise<{ success: boolean; output: string }> => {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY required")
-  }
 
   onOutput(`\n📍 Executing: ${step.description}\n`)
+  onOutput(`🤖 Using Pi coding agent...\n\n`)
 
-  const systemPrompt = EXECUTOR_SYSTEM_PROMPT
-    .replace("{STEP_DESCRIPTION}", step.description)
-    .replace("{STEP_DETAILS}", step.details || "")
-
-  // Stream the response
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: process.env.ARC_MODEL || "claude-sonnet-4-20250514",
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: `Execute the step described above. The plan context:\n${JSON.stringify(plan.context, null, 2)}`,
-        },
-      ],
-      stream: true,
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`)
-  }
-
-  // Parse SSE stream
-  const reader = response.body?.getReader()
-  if (!reader) throw new Error("No response body")
-
-  const decoder = new TextDecoder()
-  let buffer = ""
+  const prompt = buildStepPrompt(step, plan)
   let fullOutput = ""
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
+  // Configure Pi
+  const piConfig: PiRunnerConfig = {
+    thinking: "medium",
+    timeout: 300000, // 5 minutes
+    provider: config.provider,
+    model: config.model,
+  }
 
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split("\n")
-    buffer = lines.pop() || ""
-
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue
-      const data = line.slice(6)
-      if (data === "[DONE]") continue
-
-      try {
-        const event = JSON.parse(data)
-        if (event.type === "content_block_delta" && event.delta?.text) {
-          const text = event.delta.text
-          fullOutput += text
-          onOutput(text)
+  // Handle Pi events
+  const handleEvent = (event: PiEvent) => {
+    switch (event.type) {
+      case "text_delta":
+        fullOutput += event.delta
+        onOutput(event.delta)
+        break
+      case "toolcall_start":
+        onOutput(`\n🔧 Tool: ${event.name}\n`)
+        break
+      case "tool_result":
+        if (event.isError) {
+          onOutput(`\n⚠️ Tool error: ${event.output.slice(0, 200)}\n`)
+        } else {
+          // Show truncated output for tool results
+          const preview = event.output.slice(0, 500)
+          if (event.output.length > 500) {
+            onOutput(`${preview}...\n`)
+          }
         }
-      } catch {
-        // Ignore parse errors
-      }
+        break
+      case "thinking_delta":
+        // Optionally show thinking (dimmed)
+        // onOutput(event.delta)
+        break
+      case "error":
+        onOutput(`\n❌ Pi error: ${event.message}\n`)
+        break
+      case "done":
+        onOutput(`\n✓ Pi completed (${event.reason})\n`)
+        break
     }
+  }
+
+  // Run Pi
+  let result: PiExecutionResult
+  try {
+    result = await Effect.runPromise(
+      runPiWithCallback(prompt, piConfig, handleEvent).pipe(
+        Effect.catchAll((error) => {
+          if (error instanceof PiSpawnError) {
+            onOutput(`\n❌ Failed to spawn Pi: ${error.message}\n`)
+            onOutput(`\nMake sure Pi is installed: npm install -g @mariozechner/pi-coding-agent\n`)
+            onOutput(`Then login: pi → /login\n`)
+          } else if (error instanceof PiTimeoutError) {
+            onOutput(`\n⏱️ Pi execution timed out after ${error.timeout}ms\n`)
+          }
+          return Effect.succeed({
+            success: false,
+            events: [],
+            output: "",
+            toolCalls: [],
+            error: error.message,
+          } satisfies PiExecutionResult)
+        })
+      )
+    )
+  } catch (e) {
+    onOutput(`\n❌ Unexpected error: ${e instanceof Error ? e.message : "Unknown"}\n`)
+    return { success: false, output: fullOutput }
+  }
+
+  // Check if Pi succeeded
+  if (!result.success) {
+    onOutput(`\n❌ Pi execution failed: ${result.error || "Unknown error"}\n`)
+    return { success: false, output: fullOutput }
   }
 
   // Run verification if present
   if (step.verification?.command) {
     onOutput(`\n\n🔍 Verifying: ${step.verification.command}\n`)
     
-    const proc = Bun.spawn(["sh", "-c", step.verification.command], {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
+    try {
+      const proc = Bun.spawn(["sh", "-c", step.verification.command], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
 
-    const stdout = await new Response(proc.stdout).text()
-    const stderr = await new Response(proc.stderr).text()
-    const exitCode = await proc.exited
+      const stdout = await new Response(proc.stdout).text()
+      const stderr = await new Response(proc.stderr).text()
+      const exitCode = await proc.exited
 
-    if (stdout) onOutput(stdout)
-    if (stderr) onOutput(`\n⚠️ ${stderr}`)
+      if (stdout) onOutput(stdout)
+      if (stderr) onOutput(`\n⚠️ ${stderr}`)
 
-    if (exitCode === 0) {
-      onOutput(`\n✅ Verification passed\n`)
-      return { success: true, output: fullOutput }
-    } else {
-      onOutput(`\n❌ Verification failed (exit code ${exitCode})\n`)
+      if (exitCode === 0) {
+        onOutput(`\n✅ Verification passed\n`)
+        return { success: true, output: fullOutput }
+      } else {
+        onOutput(`\n❌ Verification failed (exit code ${exitCode})\n`)
+        return { success: false, output: fullOutput }
+      }
+    } catch (e) {
+      onOutput(`\n❌ Verification error: ${e instanceof Error ? e.message : "Unknown"}\n`)
       return { success: false, output: fullOutput }
     }
   }
 
-  // Manual verification or no verification
+  // No verification specified - assume success if Pi completed
   return { success: true, output: fullOutput }
 }
 
@@ -202,7 +260,7 @@ const RunApp: React.FC<RunAppProps> = ({ plan: initialPlan, config, onComplete }
     }))
 
     try {
-      const result = await executeStep(step, plan, addOutput)
+      const result = await executeStep(step, plan, config, addOutput)
 
       const newPlan = updateStep(plan, step.id, {
         status: result.success ? "completed" : "failed",
@@ -232,7 +290,7 @@ const RunApp: React.FC<RunAppProps> = ({ plan: initialPlan, config, onComplete }
     }
 
     isRunning.current = false
-  }, [plan, config.crankMode, addOutput, onComplete])
+  }, [plan, config, addOutput, onComplete])
 
   // Start running on mount (or after pause)
   useEffect(() => {
@@ -270,6 +328,7 @@ const RunApp: React.FC<RunAppProps> = ({ plan: initialPlan, config, onComplete }
 
   const completedSteps = plan.steps.filter((s) => s.status === "completed").length
   const totalSteps = plan.steps.length
+  const providerInfo = config.provider ? ` (${config.provider})` : ""
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -277,7 +336,7 @@ const RunApp: React.FC<RunAppProps> = ({ plan: initialPlan, config, onComplete }
       <Box marginBottom={1} justifyContent="space-between">
         <Box>
           <Text bold color="magenta">⚡ Arc</Text>
-          <Text color="gray"> - {plan.name}</Text>
+          <Text color="gray"> → Pi{providerInfo} - {plan.name}</Text>
         </Box>
         <Box>
           <Text color="cyan">
@@ -306,7 +365,7 @@ const RunApp: React.FC<RunAppProps> = ({ plan: initialPlan, config, onComplete }
         {state.status === "running" && (
           <>
             <Spinner type="dots" />
-            <Text color="yellow"> Executing...</Text>
+            <Text color="yellow"> Executing via Pi...</Text>
           </>
         )}
         {state.status === "paused" && (
@@ -372,8 +431,10 @@ export const runRunCommand = (
       return
     }
 
-    console.log(`\n⚡ Arc - Executing: ${plan.name}`)
-    console.log(`📋 ${plan.steps.length} steps, ${config.crankMode ? "hand-crank" : "continuous"} mode\n`)
+    const providerInfo = config.provider ? ` via ${config.provider}` : ""
+    console.log(`\n⚡ Arc → Pi${providerInfo}`)
+    console.log(`📋 Executing: ${plan.name}`)
+    console.log(`📊 ${plan.steps.length} steps, ${config.crankMode ? "hand-crank" : "continuous"} mode\n`)
 
     const onComplete = (finalPlan: Plan) => {
       // Save final plan
