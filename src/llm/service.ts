@@ -401,7 +401,7 @@ const createOpenAIService = (config: ProviderConfig): ILLMService => {
 export const LLMServiceLive: Layer.Layer<LLMService> = Layer.effect(
   LLMService,
   Effect.gen(function* () {
-    const provider = (process.env.RALPH_PROVIDER || "anthropic") as "anthropic" | "openai"
+    const provider = (process.env.ARC_PROVIDER || "anthropic") as "anthropic" | "openai"
     const apiKey = provider === "anthropic"
       ? process.env.ANTHROPIC_API_KEY
       : process.env.OPENAI_API_KEY
@@ -413,7 +413,7 @@ export const LLMServiceLive: Layer.Layer<LLMService> = Layer.effect(
     return yield* createLLMService({
       provider,
       apiKey,
-      model: process.env.RALPH_MODEL,
+      model: process.env.ARC_MODEL,
     })
   })
 )

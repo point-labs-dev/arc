@@ -2,21 +2,18 @@
 
 ## Overview
 
-Ralph is an agentic coding orchestrator that implements Geoff Huntley's "Ralph Wiggum primitive" with a planning-first approach. It has two distinct phases:
+Arc is an agentic coding orchestrator with a planning-first approach. It has two distinct phases:
 
 1. **Planning Phase** - Interactive UI to collaboratively build and refine a plan with an AI agent
-2. **Execution Phase** - Ralph loop that executes the plan until complete
+2. **Execution Phase** - Arc loop that executes the plan until complete
 
 ## Philosophy
 
 Based on [Geoff Huntley's theories](https://ghuntley.com/ralph):
 
-> "Ralph is a technique. In its purest form, Ralph is a Bash loop."
-> `while :; do cat PROMPT.md | claude-code ; done`
-
 > "The technique is deterministically bad in an undeterministic world."
 
-> "Each time Ralph does something bad, Ralph gets tuned - like a guitar."
+> "Each time it does something bad, it gets tuned - like a guitar."
 
 Key principles:
 - **Eventual consistency** - Faith that the loop will converge
@@ -26,15 +23,15 @@ Key principles:
 
 ## Execution Modes
 
-### Ralph Mode (Continuous)
+### Arc Mode (Continuous)
 ```bash
-ralph run plan.json
+arc run plan.json
 ```
 Runs the loop until the plan is complete or circuit breaker triggers.
 
 ### Hand-Crank Mode
 ```bash
-ralph run plan.json --crank
+arc run plan.json --crank
 ```
 Executes one iteration, shows full output, waits for user input:
 - `[c]ontinue` - Run next iteration
@@ -45,11 +42,11 @@ Executes one iteration, shows full output, waits for user input:
 ## Commands
 
 ```bash
-ralph plan                    # Start planning UI
-ralph plan --load plan.json   # Resume existing plan
-ralph run plan.json           # Execute plan (Ralph mode)
-ralph run plan.json --crank   # Execute plan (Hand-crank mode)
-ralph status                  # Show current execution status
+arc plan                    # Start planning UI
+arc plan --load plan.json   # Resume existing plan
+arc run plan.json           # Execute plan (Arc mode)
+arc run plan.json --crank   # Execute plan (Hand-crank mode)
+arc status                  # Show current execution status
 ```
 
 ## Project Structure
@@ -61,7 +58,7 @@ src/
 │   ├── plan.ts               # Planning command
 │   └── run.ts                # Execution command
 ├── core/
-│   ├── loop.ts               # Ralph loop implementation
+│   ├── loop.ts               # Arc loop implementation
 │   ├── planner.ts            # Plan management
 │   ├── executor.ts           # Step execution
 │   └── verifier.ts           # QA and verification
@@ -178,7 +175,7 @@ bun test --watch              # Watch mode
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes* | Claude API key |
 | `OPENAI_API_KEY` | Yes* | OpenAI API key |
-| `RALPH_PROVIDER` | No | Default: anthropic |
-| `RALPH_MODEL` | No | Default: claude-sonnet-4-20250514 |
+| `ARC_PROVIDER` | No | Default: anthropic |
+| `ARC_MODEL` | No | Default: claude-sonnet-4-20250514 |
 
 *At least one API key required

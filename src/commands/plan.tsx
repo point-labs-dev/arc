@@ -145,7 +145,7 @@ const PlanApp: React.FC<PlanAppProps> = ({ loadFile, onComplete }) => {
     <Box flexDirection="column" padding={1}>
       {/* Header */}
       <Box marginBottom={1}>
-        <Text bold color="magenta">🎯 Ralph Planning</Text>
+        <Text bold color="magenta">⚡ Arc Planning</Text>
         <Text color="gray"> - Build your execution plan</Text>
       </Box>
 
@@ -154,7 +154,7 @@ const PlanApp: React.FC<PlanAppProps> = ({ loadFile, onComplete }) => {
         {messages.slice(-10).map((msg, i) => (
           <Box key={i} marginBottom={1}>
             <Text color={msg.role === "user" ? "cyan" : "green"}>
-              {msg.role === "user" ? "You: " : "Ralph: "}
+              {msg.role === "user" ? "You: " : "Arc: "}
             </Text>
             <Text>{msg.content.slice(0, 500)}{msg.content.length > 500 ? "..." : ""}</Text>
           </Box>
@@ -222,7 +222,7 @@ const callLLM = async (messages: Message[]): Promise<string> => {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: process.env.RALPH_MODEL || "claude-sonnet-4-20250514",
+      model: process.env.ARC_MODEL || "claude-sonnet-4-20250514",
       max_tokens: 4096,
       system: messages.find((m) => m.role === "system")?.content,
       messages: messages
@@ -284,8 +284,8 @@ export const runPlanCommand = (loadFile?: string): Effect.Effect<void> =>
       const filename = `plan-${Date.now()}.json`
       fs.writeFileSync(filename, JSON.stringify(plan, null, 2))
       console.log(`\n✅ Plan saved to ${filename}`)
-      console.log(`\nTo execute: ralph run ${filename}`)
-      console.log(`Hand-crank:  ralph run ${filename} --crank`)
+      console.log(`\nTo execute: arc run ${filename}`)
+      console.log(`Hand-crank:  arc run ${filename} --crank`)
       resume(Effect.succeed(undefined))
     }
 

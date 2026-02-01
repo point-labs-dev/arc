@@ -1,8 +1,8 @@
 /**
  * Plan Types
  * 
- * A plan represents a complete specification for what Ralph should build.
- * Plans are created in the planning phase and executed in the Ralph loop.
+ * A plan represents a complete specification for what Arc should build.
+ * Plans are created in the planning phase and executed in the Arc loop.
  */
 
 import { Schema } from "@effect/schema"

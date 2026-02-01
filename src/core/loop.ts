@@ -1,7 +1,7 @@
 /**
- * Ralph Loop
+ * Arc Loop
  * 
- * The heart of Ralph - implements Geoff Huntley's agentic loop pattern.
+ * The heart of Arc - implements the agentic loop pattern.
  * 
  * "while :; do cat PROMPT.md | claude-code ; done"
  * 
@@ -16,7 +16,7 @@ import { Effect, Stream, Ref, pipe } from "effect"
 import { Data } from "effect"
 import type { Plan, Step } from "../types/plan"
 import { getCurrentStep, updateStep, isComplete } from "../types/plan"
-import type { RalphEvent, EventEmitter } from "../types/events"
+import type { ArcEvent, EventEmitter } from "../types/events"
 import { iterationStart, iterationEnd, error } from "../types/events"
 
 // === Errors ===
@@ -109,7 +109,7 @@ export interface VerificationResult {
 // === Loop Implementation ===
 
 /**
- * Run a single iteration of the Ralph loop
+ * Run a single iteration of the Arc loop
  */
 const runIteration = (
   state: LoopState,
@@ -231,7 +231,7 @@ const shouldContinue = (state: LoopState, config: LoopConfig): boolean => {
 }
 
 /**
- * Main Ralph loop
+ * Main Arc loop
  * 
  * Runs iterations until:
  * - Plan is complete
@@ -282,7 +282,7 @@ export const runSingleIteration = (
 export const streamLoop = (
   plan: Plan,
   config: LoopConfig
-): Stream.Stream<RalphEvent, LoopError | CircuitBreakerError | UserStopError> =>
+): Stream.Stream<ArcEvent, LoopError | CircuitBreakerError | UserStopError> =>
   Stream.async((emit) => {
     const unsubscribe = config.events.on((event) => {
       emit.single(event)

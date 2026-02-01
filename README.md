@@ -1,8 +1,8 @@
-# Ralph 🍩
+# Arc ⚡
 
-> "Me fail English? That's unpossible!" - Ralph Wiggum
+> Energy in, shaped code out. Iteration over iteration until it's right.
 
-An agentic coding orchestrator that implements [Geoff Huntley's Ralph Wiggum primitive](https://ghuntley.com/ralph) with a planning-first approach.
+An agentic coding orchestrator with a planning-first approach.
 
 ## Philosophy
 
@@ -10,14 +10,21 @@ An agentic coding orchestrator that implements [Geoff Huntley's Ralph Wiggum pri
 while :; do cat PROMPT.md | claude-code ; done
 ```
 
-Ralph is a technique. In its purest form, it's a loop. The beauty of Ralph is that it's **deterministically bad in an undeterministic world**.
+Arc is a technique. In its purest form, it's a loop. The beauty of Arc is that it's **deterministically bad in an undeterministic world**.
 
-Each time Ralph does something wrong, you tune it—like a guitar. Eventually, Ralph learns all the signs.
+Each time Arc does something wrong, you tune it—like a guitar. Eventually, Arc learns all the signs.
+
+## Why "Arc"?
+
+- ⚡ **Electric arc** — energy/tokens transformed into output
+- 📐 **Architecture** — design thinking, structured approach
+- 🏛️ **Pointed arch** — the foundation of Point Labs
+- 📈 **Story arc** — iteration toward completion
 
 ## Features
 
 - **Planning Phase** - Interactive UI to build execution plans collaboratively with AI
-- **Execution Phase** - Ralph loop that runs until the plan is complete
+- **Execution Phase** - Arc loop that runs until the plan is complete
 - **Hand-Crank Mode** - Pause after each iteration to observe and tune
 - **Full Observability** - See everything the agent does
 - **Verification** - QA, testing, and review built into every step
@@ -43,15 +50,15 @@ bun run crank plan.json
 
 ## Modes
 
-### Continuous Mode (Ralph Mode)
+### Continuous Mode (Arc Mode)
 ```bash
-ralph run plan.json
+arc run plan.json
 ```
 Runs the loop until the plan is complete or the circuit breaker triggers.
 
 ### Hand-Crank Mode
 ```bash
-ralph run plan.json --crank
+arc run plan.json --crank
 ```
 Pauses after each iteration. Options:
 - `[C]ontinue` - Run next iteration
@@ -63,11 +70,11 @@ Pauses after each iteration. Options:
 
 | Command | Description |
 |---------|-------------|
-| `ralph plan` | Start planning UI |
-| `ralph plan --load plan.json` | Resume existing plan |
-| `ralph run plan.json` | Execute plan (continuous) |
-| `ralph run plan.json --crank` | Execute plan (hand-crank) |
-| `ralph status` | Show execution status |
+| `arc plan` | Start planning UI |
+| `arc plan --load plan.json` | Resume existing plan |
+| `arc run plan.json` | Execute plan (continuous) |
+| `arc run plan.json --crank` | Execute plan (hand-crank) |
+| `arc status` | Show execution status |
 
 ## Environment Variables
 
@@ -75,8 +82,8 @@ Pauses after each iteration. Options:
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes* | Claude API key |
 | `OPENAI_API_KEY` | Yes* | OpenAI API key |
-| `RALPH_PROVIDER` | No | Default: `anthropic` |
-| `RALPH_MODEL` | No | Default: `claude-sonnet-4-20250514` |
+| `ARC_PROVIDER` | No | Default: `anthropic` |
+| `ARC_MODEL` | No | Default: `claude-sonnet-4-20250514` |
 
 \* At least one API key is required
 
@@ -108,7 +115,6 @@ Pauses after each iteration. Options:
 ## Inspiration
 
 - [Geoff Huntley's Ralph](https://ghuntley.com/ralph) - The original technique
-- [Pi Coding Agent](https://github.com/badlogic/pi-mono) - Extensible architecture
 - [Effect.ts](https://effect.website) - Functional programming patterns
 
 ## Development
@@ -133,4 +139,4 @@ MIT
 
 ---
 
-*"I choo-choo-choose you!"* 🚂
+*"The arc of iteration bends toward working code."* ⚡

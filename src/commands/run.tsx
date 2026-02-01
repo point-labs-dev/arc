@@ -1,9 +1,9 @@
 /**
  * Run Command
  * 
- * Executes a plan using the Ralph loop.
+ * Executes a plan using the Arc loop.
  * Two modes:
- * - Continuous (ralph mode): runs until complete
+ * - Continuous (arc mode): runs until complete
  * - Hand-crank: pauses after each iteration for review
  */
 
@@ -14,7 +14,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react"
 import * as fs from "fs"
 import type { Plan, Step } from "../types/plan"
 import { getCurrentStep, updateStep, isComplete } from "../types/plan"
-import { createEventEmitter, type RalphEvent } from "../types/events"
+import { createEventEmitter, type ArcEvent } from "../types/events"
 
 // === Types ===
 
@@ -78,7 +78,7 @@ const executeStep = async (
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: process.env.RALPH_MODEL || "claude-sonnet-4-20250514",
+      model: process.env.ARC_MODEL || "claude-sonnet-4-20250514",
       max_tokens: 8192,
       system: systemPrompt,
       messages: [
@@ -276,7 +276,7 @@ const RunApp: React.FC<RunAppProps> = ({ plan: initialPlan, config, onComplete }
       {/* Header */}
       <Box marginBottom={1} justifyContent="space-between">
         <Box>
-          <Text bold color="magenta">🔄 Ralph</Text>
+          <Text bold color="magenta">⚡ Arc</Text>
           <Text color="gray"> - {plan.name}</Text>
         </Box>
         <Box>
@@ -372,7 +372,7 @@ export const runRunCommand = (
       return
     }
 
-    console.log(`\n🎯 Ralph - Executing: ${plan.name}`)
+    console.log(`\n⚡ Arc - Executing: ${plan.name}`)
     console.log(`📋 ${plan.steps.length} steps, ${config.crankMode ? "hand-crank" : "continuous"} mode\n`)
 
     const onComplete = (finalPlan: Plan) => {

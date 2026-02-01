@@ -1,7 +1,7 @@
 /**
  * Event Types
  * 
- * Events represent everything that happens during Ralph execution.
+ * Events represent everything that happens during Arc execution.
  * Full observability - see exactly what the agent does.
  */
 
@@ -151,7 +151,7 @@ export interface ErrorEvent {
 
 // === Union Type ===
 
-export type RalphEvent =
+export type ArcEvent =
   | IterationStartEvent
   | IterationEndEvent
   | LLMRequestEvent
@@ -173,10 +173,10 @@ export type RalphEvent =
 
 // === Event Emitter ===
 
-export type EventHandler = (event: RalphEvent) => void
+export type EventHandler = (event: ArcEvent) => void
 
 export interface EventEmitter {
-  emit: (event: RalphEvent) => void
+  emit: (event: ArcEvent) => void
   on: (handler: EventHandler) => () => void
 }
 

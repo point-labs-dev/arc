@@ -1,10 +1,10 @@
 {
-  "name": "@point-labs/ralph",
+  "name": "@point-labs/arc",
   "version": "0.1.0",
-  "description": "Agentic coding orchestrator with planning and execution phases",
+  "description": "Agentic coding orchestrator — energy in, shaped code out",
   "type": "module",
   "bin": {
-    "ralph": "./dist/cli.js"
+    "arc": "./dist/cli.js"
   },
   "scripts": {
     "dev": "bun run src/cli.ts",
@@ -35,7 +35,7 @@
   "keywords": [
     "ai",
     "coding-agent",
-    "ralph",
+    "arc",
     "effect-ts",
     "orchestrator"
   ],
