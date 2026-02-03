@@ -24,7 +24,9 @@ Usage:
 
 Options:
   --crank              Hand-crank mode: pause after each iteration
-  --max-iter <n>       Maximum iterations (default: 50)
+  --max-iter <n>       Max iterations per step (default: 5)
+  --max-no-change <n>  Circuit breaker: max no-change iterations (default: 3)
+  --max-total <n>      Max total iterations across all steps (default: 50)
   --load <file>        Load existing plan for editing
   --provider <name>    LLM provider (anthropic, openai, google, etc.)
   --model <id>         Model ID to use
@@ -76,6 +78,8 @@ interface Args {
   loadFile?: string
   crankMode: boolean
   maxIterations: number
+  maxNoChange: number
+  maxTotal: number
   provider?: string
   model?: string
 }
@@ -84,7 +88,9 @@ const parseArgs = (argv: string[]): Args => {
   const args: Args = {
     command: "help",
     crankMode: false,
-    maxIterations: 50,
+    maxIterations: 5,
+    maxNoChange: 3,
+    maxTotal: 50,
   }
 
   let i = 0
@@ -115,7 +121,13 @@ const parseArgs = (argv: string[]): Args => {
         break
       case "--max-iter":
       case "-m":
-        args.maxIterations = parseInt(argv[++i] || "50")
+        args.maxIterations = parseInt(argv[++i] || "5")
+        break
+      case "--max-no-change":
+        args.maxNoChange = parseInt(argv[++i] || "3")
+        break
+      case "--max-total":
+        args.maxTotal = parseInt(argv[++i] || "50")
         break
       case "--load":
       case "-l":
@@ -166,8 +178,10 @@ const main = async () => {
       const { runRunCommand } = await import("./commands/run")
       await Effect.runPromise(
         runRunCommand(args.planFile, {
-          crankMode: args.crankMode,
+          crank: args.crankMode,
           maxIterations: args.maxIterations,
+          maxNoChange: args.maxNoChange,
+          maxTotal: args.maxTotal,
           provider: args.provider,
           model: args.model,
         })
