@@ -2,14 +2,20 @@
 
 ## Overview
 
-Arc is an agentic coding orchestrator that uses Pi as its execution engine. It implements a planning-first approach with continuous iteration until tasks are complete.
+Arc is an agentic coding orchestrator with an **agent-agnostic** execution layer. It implements a planning-first approach with continuous iteration until tasks are complete.
 
 **Architecture:**
 ```
-Arc (planning, orchestration)
-  → Pi (execution, LLM calls, tool use)
+Arc (planning, orchestration, Ralph loop)
+  → Agent (Codex, Claude Code, OpenCode, Pi)
     → LLM (Claude, GPT, Gemini, etc.)
 ```
+
+**Supported Agents:**
+- **Codex** - OpenAI's coding agent (gpt-5.2-codex) [default]
+- **Claude Code** - Anthropic's Claude coding assistant
+- **OpenCode** - Open-source coding agent
+- **Pi** - Mario Zechner's multi-provider coding agent
 
 ## Philosophy
 
@@ -49,9 +55,13 @@ arc run plan.json
 ```bash
 arc plan                           # Start planning UI
 arc plan --load plan.json          # Resume existing plan
-arc run plan.json                  # Execute plan (continuous)
-arc run plan.json --crank          # Execute plan (hand-crank mode)
-arc run plan.json --provider openai  # Use specific provider
+arc run plan.json                  # Execute plan (default: codex)
+arc run plan.json --agent pi       # Execute with Pi
+arc run plan.json --agent codex    # Execute with Codex
+arc run plan.json --agent claude-code  # Execute with Claude Code
+arc run plan.json --crank          # Execute with hand-crank mode
+arc run plan.json --auto-approve   # Auto-approve changes (--yolo)
+arc run plan.json --agent pi --provider openai  # Pi with OpenAI
 arc status                         # Show execution status
 ```
 
@@ -63,34 +73,55 @@ src/
 ├── commands/
 │   ├── plan.tsx              # Planning UI (Ink/React)
 │   └── run.tsx               # Execution UI (Ink/React)
-├── pi/
+├── agents/                   # Agent-agnostic execution layer
+│   ├── index.ts              # Module exports
+│   ├── types.ts              # Agent types, config, errors
+│   └── spawn.ts              # PTY-based process spawning
+├── pi/                       # Legacy Pi-specific module (deprecated)
 │   ├── index.ts              # Module exports
 │   ├── types.ts              # Pi event types
 │   ├── events.ts             # Event parsing utilities
-│   └── spawn.ts              # Process spawning
+│   └── spawn.ts              # Process spawning (JSON mode)
 ├── core/
-│   └── loop.ts               # Ralph loop implementation (Phase 2)
+│   ├── ralph.ts              # Ralph loop implementation
+│   ├── diff.ts               # Git diff tracking
+│   └── loop.ts               # Legacy loop (Phase 1)
 └── types/
     ├── plan.ts               # Plan/Step types
     └── events.ts             # Arc event types
 ```
 
-## Pi Integration
+## Agent Integration
 
-Arc spawns Pi as a subprocess using JSON mode:
+Arc spawns coding agents as subprocesses using PTY (pseudo-terminal) for proper terminal emulation:
 
-```bash
-pi --mode json --no-session -p "Execute this step: ..."
+```typescript
+// Codex
+codex exec --yolo "Execute this step: ..."
+
+// Claude Code
+claude "Execute this step: ..."
+
+// OpenCode
+opencode run "Execute this step: ..."
+
+// Pi
+pi -p "Execute this step: ..."
 ```
 
-Pi emits events as JSON lines:
-- `text_delta` - Streaming text output
-- `toolcall_start/end` - Tool invocations
-- `tool_result` - Tool outputs
-- `done` - Completion with reason
-- `error` - Errors
+**Agent Selection:**
+```typescript
+interface AgentConfig {
+  agent: "codex" | "claude-code" | "opencode" | "pi"
+  cwd: string
+  autoApprove?: boolean  // --yolo mode
+  timeout?: number
+  provider?: string      // For Pi
+  model?: string         // For Pi
+}
+```
 
-Arc streams these to its TUI and aggregates results.
+Arc streams stdout to its TUI and tracks exit codes for verification.
 
 ## Plan Format
 
@@ -159,14 +190,24 @@ const RunApp: React.FC<Props> = ({ plan, config, onComplete }) => {
 
 ## Environment
 
-Pi handles LLM authentication. Set up via:
+Each agent handles its own LLM authentication:
+
+**Codex:**
+```bash
+export OPENAI_API_KEY=sk-...
+# Or use ~/.codex/config.toml
+```
+
+**Claude Code:**
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**Pi:**
 ```bash
 pi
 /login  # OAuth for subscriptions (Claude Pro, ChatGPT Plus, etc.)
-```
-
-Or use API keys:
-```bash
+# Or API keys
 export ANTHROPIC_API_KEY=sk-ant-...
 export OPENAI_API_KEY=sk-...
 ```
@@ -184,12 +225,14 @@ bun run build                 # Build for distribution
 ## Roadmap
 
 - [x] Phase 1: Pi as execution engine
-- [ ] Phase 2: Ralph loop (iteration until done)
+- [x] Phase 2: Ralph loop (iteration until done)
+- [x] Phase 2.5: Agent-agnostic execution (Codex, Claude Code, OpenCode, Pi)
 - [ ] Phase 3: Multi-agent swarm
+- [ ] Phase 4: OpenClaw integration
 
 ## Dependencies
 
-- **@mariozechner/pi-coding-agent** - Pi coding agent
 - **effect** - Functional programming
 - **ink** - React for CLI
 - **react** - UI components
+- **node-pty** - PTY spawning for terminal emulation

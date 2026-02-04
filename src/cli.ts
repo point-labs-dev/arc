@@ -23,41 +23,33 @@ Usage:
   arc --help                   Show this help
 
 Options:
+  --agent <name>       Coding agent to use (codex, claude-code, opencode, pi)
   --crank              Hand-crank mode: pause after each iteration
   --max-iter <n>       Max iterations per step (default: 5)
   --max-no-change <n>  Circuit breaker: max no-change iterations (default: 3)
   --max-total <n>      Max total iterations across all steps (default: 50)
   --load <file>        Load existing plan for editing
-  --provider <name>    LLM provider (anthropic, openai, google, etc.)
-  --model <id>         Model ID to use
+  --provider <name>    LLM provider for Pi (anthropic, openai, google, etc.)
+  --model <id>         Model ID for Pi
+  --auto-approve       Auto-approve changes (--yolo mode for Codex)
 
-Execution:
-  Arc uses Pi (https://github.com/badlogic/pi-mono) as the execution engine.
-  Pi supports multiple LLM providers via API keys or OAuth subscriptions.
-
-  First time setup:
-    npm install -g @mariozechner/pi-coding-agent
-    pi
-    /login    # Authenticate with your provider
-
-Providers (OAuth subscription):
-  - Anthropic Claude Pro/Max
-  - OpenAI ChatGPT Plus/Pro (Codex)
-  - GitHub Copilot
-  - Google Gemini CLI
-
-Providers (API key):
-  - Anthropic, OpenAI, Google, xAI, Groq, Mistral, OpenRouter, etc.
+Agents:
+  codex        OpenAI Codex CLI (gpt-5.2-codex) - install: npm i -g @openai/codex
+  claude-code  Anthropic Claude Code - install: npm i -g @anthropic-ai/claude-code
+  opencode     OpenCode - install: npm i -g opencode
+  pi           Pi Coding Agent - install: npm i -g @mariozechner/pi-coding-agent
 
 Examples:
   arc plan                              Start a new planning session
   arc plan --load plan.json             Resume planning from file
-  arc run plan.json                     Execute with default provider
-  arc run plan.json --provider openai   Execute with OpenAI
-  arc run plan.json --crank             Execute with manual control
+  arc run plan.json                     Execute with default agent (codex)
+  arc run plan.json --agent pi          Execute with Pi
+  arc run plan.json --agent codex       Execute with Codex
+  arc run plan.json --crank             Execute with hand-crank mode
+  arc run plan.json --agent pi --provider openai   Pi with OpenAI
 
 Philosophy:
-  Arc orchestrates Pi in a continuous loop until the task is complete.
+  Arc orchestrates coding agents in a continuous loop until the task is complete.
   Like an electric arc shaping metal, or a story arc reaching its conclusion.
   
   Hand-crank mode lets you observe and tune the agent like a guitar.
@@ -66,11 +58,13 @@ Philosophy:
 
 Architecture:
   Arc (planning, orchestration)
-    → Pi (execution, tool use)
+    → Agent (Codex, Claude Code, OpenCode, Pi)
       → LLM (Claude, GPT, Gemini, etc.)
 
 Inspired by: https://ghuntley.com/ralph
 `
+
+type AgentType = "codex" | "claude-code" | "opencode" | "pi"
 
 interface Args {
   command: "plan" | "run" | "status" | "help"
@@ -80,8 +74,10 @@ interface Args {
   maxIterations: number
   maxNoChange: number
   maxTotal: number
+  agent: AgentType
   provider?: string
   model?: string
+  autoApprove: boolean
 }
 
 const parseArgs = (argv: string[]): Args => {
@@ -91,6 +87,8 @@ const parseArgs = (argv: string[]): Args => {
     maxIterations: 5,
     maxNoChange: 3,
     maxTotal: 50,
+    agent: "codex", // Default to Codex
+    autoApprove: false,
   }
 
   let i = 0
@@ -133,12 +131,25 @@ const parseArgs = (argv: string[]): Args => {
       case "-l":
         args.loadFile = argv[++i]
         break
+      case "--agent":
+      case "-a":
+        const agentArg = argv[++i]?.toLowerCase()
+        if (agentArg && ["codex", "claude-code", "opencode", "pi"].includes(agentArg)) {
+          args.agent = agentArg as AgentType
+        } else {
+          console.error(`Invalid agent: ${agentArg}. Use: codex, claude-code, opencode, pi`)
+          process.exit(1)
+        }
+        break
       case "--provider":
-      case "-p":
         args.provider = argv[++i]
         break
       case "--model":
         args.model = argv[++i]
+        break
+      case "--auto-approve":
+      case "--yolo":
+        args.autoApprove = true
         break
       default:
         if (!arg.startsWith("-") && args.command === "help") {
@@ -172,7 +183,7 @@ const main = async () => {
     case "run": {
       if (!args.planFile) {
         console.error("Error: Plan file required")
-        console.error("Usage: arc run <plan.json> [--crank] [--provider <name>] [--model <id>]")
+        console.error("Usage: arc run <plan.json> [--agent <name>] [--crank]")
         process.exit(1)
       }
       const { runRunCommand } = await import("./commands/run")
@@ -182,8 +193,10 @@ const main = async () => {
           maxIterations: args.maxIterations,
           maxNoChange: args.maxNoChange,
           maxTotal: args.maxTotal,
+          agent: args.agent,
           provider: args.provider,
           model: args.model,
+          autoApprove: args.autoApprove,
         })
       )
       break

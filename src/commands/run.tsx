@@ -16,14 +16,16 @@ import React, { useState, useEffect, useCallback, useRef } from "react"
 import * as fs from "fs"
 import type { Plan, Step } from "../types/plan"
 import { getCurrentStep, isComplete } from "../types/plan"
-import { 
-  runPiWithCallback, 
-  PiSpawnError, 
-  PiTimeoutError,
-  type PiEvent,
-  type PiRunnerConfig,
-  type PiExecutionResult,
-} from "../pi"
+import {
+  runAgent,
+  AgentSpawnError,
+  AgentTimeoutError,
+  AgentNotFoundError,
+  AGENTS,
+  type AgentType,
+  type AgentConfig,
+  type AgentExecutionResult,
+} from "../agents"
 import {
   runRalphLoop,
   buildContextualPrompt,
@@ -42,8 +44,10 @@ interface RunConfig {
   maxIterationsPerStep: number
   maxNoChangeIterations: number
   maxTotalIterations: number
+  agent: AgentType
   provider?: string
   model?: string
+  autoApprove: boolean
 }
 
 type UIState = 
@@ -121,8 +125,11 @@ const createExecutor = (
   const basePrompt = context.promptOverride || buildStepPrompt(step, context.plan)
   const prompt = buildContextualPrompt(basePrompt, context.previousAttempts)
 
+  const agentInfo = AGENTS[config.agent]
+  
   onOutput(`\n${"─".repeat(60)}\n`)
   onOutput(`📍 Step: ${step.description}\n`)
+  onOutput(`🤖 Agent: ${agentInfo.name}\n`)
   onOutput(`🔄 Iteration ${context.stepIteration} (total: ${context.iteration})\n`)
   
   if (context.previousAttempts.length > 0) {
@@ -134,59 +141,39 @@ const createExecutor = (
   
   onOutput(`${"─".repeat(60)}\n\n`)
 
-  let fullOutput = ""
-
-  // Configure Pi
-  const piConfig: PiRunnerConfig = {
-    thinking: "medium",
+  // Configure agent
+  const agentConfig: AgentConfig = {
+    agent: config.agent,
+    cwd: process.cwd(),
+    autoApprove: config.autoApprove,
     timeout: 300000, // 5 minutes
     provider: config.provider,
     model: config.model,
   }
 
-  // Handle Pi events
-  const handleEvent = (event: PiEvent) => {
-    switch (event.type) {
-      case "text_delta":
-        fullOutput += event.delta
-        onOutput(event.delta)
-        break
-      case "toolcall_start":
-        onOutput(`\n🔧 ${event.name}\n`)
-        break
-      case "tool_result":
-        if (event.isError) {
-          onOutput(`⚠️ ${event.output.slice(0, 200)}\n`)
-        }
-        break
-      case "error":
-        onOutput(`\n❌ ${event.message}\n`)
-        break
-      case "done":
-        onOutput(`\n✓ Done (${event.reason})\n`)
-        break
-    }
-  }
-
-  // Run Pi
-  let piResult: PiExecutionResult
+  // Run agent with streaming output
+  let agentResult: AgentExecutionResult
   try {
-    piResult = await Effect.runPromise(
-      runPiWithCallback(prompt, piConfig, handleEvent).pipe(
+    agentResult = await Effect.runPromise(
+      runAgent(prompt, agentConfig, (text) => {
+        onOutput(text)
+      }).pipe(
         Effect.catchAll((error) => {
-          if (error instanceof PiSpawnError) {
-            onOutput(`\n❌ Failed to spawn Pi: ${error.message}\n`)
-            onOutput(`\nMake sure Pi is installed: npm install -g @mariozechner/pi-coding-agent\n`)
-          } else if (error instanceof PiTimeoutError) {
+          if (error instanceof AgentNotFoundError) {
+            onOutput(`\n❌ Agent not found: ${error.message}\n`)
+            onOutput(`\nInstall ${agentInfo.name}: check --help for instructions\n`)
+          } else if (error instanceof AgentSpawnError) {
+            onOutput(`\n❌ Failed to spawn ${agentInfo.name}: ${error.message}\n`)
+          } else if (error instanceof AgentTimeoutError) {
             onOutput(`\n⏱️ Timed out after ${error.timeout}ms\n`)
           }
           return Effect.succeed({
             success: false,
-            events: [],
             output: "",
-            toolCalls: [],
+            exitCode: 1,
             error: error.message,
-          } satisfies PiExecutionResult)
+            durationMs: 0,
+          } satisfies AgentExecutionResult)
         })
       )
     )
@@ -195,18 +182,20 @@ const createExecutor = (
     onOutput(`\n❌ Error: ${errorMsg}\n`)
     return { 
       success: false, 
-      output: fullOutput, 
+      output: "", 
       verificationPassed: false,
       error: errorMsg,
     }
   }
 
-  if (!piResult.success) {
+  onOutput(`\n✓ ${agentInfo.name} finished (exit ${agentResult.exitCode}, ${(agentResult.durationMs / 1000).toFixed(1)}s)\n`)
+
+  if (!agentResult.success) {
     return {
       success: false,
-      output: fullOutput,
+      output: agentResult.output,
       verificationPassed: false,
-      error: piResult.error || "Pi execution failed",
+      error: agentResult.error || `${agentInfo.name} execution failed`,
     }
   }
 
@@ -232,14 +221,14 @@ const createExecutor = (
         onOutput(`\n✅ Verification passed!\n`)
         return { 
           success: true, 
-          output: fullOutput, 
+          output: agentResult.output, 
           verificationPassed: true,
         }
       } else {
         onOutput(`\n❌ Verification failed (exit ${exitCode})\n`)
         return { 
-          success: true, // Pi succeeded, but verification failed
-          output: fullOutput, 
+          success: true, // Agent succeeded, but verification failed
+          output: agentResult.output, 
           verificationPassed: false,
           error: `Verification failed with exit code ${exitCode}`,
         }
@@ -249,7 +238,7 @@ const createExecutor = (
       onOutput(`\n❌ Verification error: ${errorMsg}\n`)
       return { 
         success: true, 
-        output: fullOutput, 
+        output: agentResult.output, 
         verificationPassed: false,
         error: `Verification error: ${errorMsg}`,
       }
@@ -259,7 +248,7 @@ const createExecutor = (
   // No verification - assume success
   return { 
     success: true, 
-    output: fullOutput, 
+    output: agentResult.output, 
     verificationPassed: true,
   }
 }
@@ -428,17 +417,20 @@ const RunApp: React.FC<RunAppProps> = ({ plan: initialPlan, config, onComplete }
   const currentStep = getCurrentStep(plan)
   const completedSteps = plan.steps.filter((s) => s.status === "completed").length
   const totalSteps = plan.steps.length
-  const providerInfo = config.provider ? ` → ${config.provider}` : ""
+  const agentInfo = AGENTS[config.agent]
+  const providerInfo = config.provider ? ` (${config.provider})` : ""
 
   return (
     <Box flexDirection="column" padding={1}>
       {/* Header */}
       <Box marginBottom={1}>
         <Text bold color="magenta">⚡ Arc</Text>
-        <Text color="gray">{providerInfo} │ </Text>
+        <Text color="gray"> → </Text>
+        <Text color="cyan">{agentInfo.name}{providerInfo}</Text>
+        <Text color="gray"> │ </Text>
         <Text>{plan.name}</Text>
         <Text color="gray"> │ </Text>
-        <Text color="cyan">[{completedSteps}/{totalSteps}]</Text>
+        <Text color="green">[{completedSteps}/{totalSteps}]</Text>
         <Text color="gray"> │ iter: {stats.iteration}</Text>
       </Box>
 
@@ -559,8 +551,10 @@ export const runRunCommand = (
     maxIterations?: number
     maxNoChange?: number
     maxTotal?: number
+    agent?: AgentType
     provider?: string
     model?: string
+    autoApprove?: boolean
   } = {}
 ): Effect.Effect<void, Error> =>
   Effect.async((resume) => {
@@ -581,19 +575,25 @@ export const runRunCommand = (
       return
     }
 
+    const agent = options.agent ?? "codex"
+    const agentInfo = AGENTS[agent]
+
     const config: RunConfig = {
       crankMode: options.crank ?? false,
       maxIterationsPerStep: options.maxIterations ?? 5,
       maxNoChangeIterations: options.maxNoChange ?? 3,
       maxTotalIterations: options.maxTotal ?? 50,
+      agent,
       provider: options.provider,
       model: options.model,
+      autoApprove: options.autoApprove ?? false,
     }
 
-    console.log(`\n⚡ Arc - Ralph Loop (Phase 2)`)
+    console.log(`\n⚡ Arc - Agent-Agnostic Execution`)
     console.log(`📋 Plan: ${plan.name}`)
+    console.log(`🤖 Agent: ${agentInfo.name}${config.provider ? ` (${config.provider})` : ""}`)
     console.log(`📊 ${plan.steps.length} steps`)
-    console.log(`🔧 Mode: ${config.crankMode ? "Hand-crank" : "Continuous"}`)
+    console.log(`🔧 Mode: ${config.crankMode ? "Hand-crank" : "Continuous"}${config.autoApprove ? " [auto-approve]" : ""}`)
     console.log(`🔄 Max ${config.maxIterationsPerStep} iterations/step, ${config.maxNoChangeIterations} no-change limit\n`)
 
     const onComplete = (finalPlan: Plan) => {
