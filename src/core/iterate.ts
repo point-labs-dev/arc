@@ -11,6 +11,7 @@
 
 import { Effect } from "effect"
 import { Data } from "effect"
+import { execSync } from "child_process"
 import type {
   Project,
   Task,
@@ -223,13 +224,34 @@ export const iterate = (
       
       // Check result
       if (result.success && result.exitCode === 0) {
-        // Verify if acceptance criteria exists
         if (task.acceptanceCriteria) {
+          // Run verification
           emit({ type: "verifying", task })
-          // For now, trust the agent. Later: run verification command
-          success = true
+          output(`\n🔍 Verifying: ${task.acceptanceCriteria}\n`)
+          
+          try {
+            // Try to run acceptance criteria as a command
+            execSync(task.acceptanceCriteria, { 
+              cwd: config.cwd, 
+              stdio: "pipe",
+              timeout: 30000,
+            })
+            output(`✅ Verification passed!\n`)
+            success = true
+          } catch (verifyError) {
+            const errMsg = verifyError instanceof Error ? verifyError.message : "Verification failed"
+            output(`❌ Verification failed: ${errMsg}\n`)
+            lastError = `Verification failed: ${errMsg}`
+          }
         } else {
+          // No acceptance criteria = crank mode (require human confirmation)
+          output(`\n⚠️  No acceptance criteria - cannot auto-verify\n`)
+          output(`   Task needs human verification or acceptance criteria\n`)
+          
+          // In non-crank mode, we mark as needing review
+          // For now, assume success but flag it
           success = true
+          output(`\n⚡ Marking complete (no verification). Add acceptance criteria for auto-verify.\n`)
         }
       } else {
         lastError = result.error || `Exit code ${result.exitCode}`

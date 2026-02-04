@@ -25,7 +25,7 @@ Usage:
   arc init "<goal>"            Initialize a new project with a goal
   arc iterate                  Run one iteration (build next task)
   arc go                       Keep iterating until done or blocked
-  arc add "<task>"             Add a task to the backlog
+  arc add "<task>" [--verify]  Add a task to the backlog
   arc status                   Show project status and progress
   arc backlog                  Show the task backlog
   arc insights                 Show learnings and insights
@@ -41,6 +41,12 @@ Options:
   --auto-approve       Auto-approve changes (--yolo mode for Codex)
   --project <file>     Project file (default: arc-project.json)
 
+Task options (for 'arc add'):
+  --verify "<cmd>"     Verification command (runs to check if task is done)
+  --why "<reason>"     Why this task matters
+  --size <s|m|l>       Task size estimate (small, medium, large)
+  --top                Add to top of backlog instead of bottom
+
 Agents:
   codex        OpenAI Codex CLI (gpt-5.2-codex)
   claude-code  Anthropic Claude Code [default]
@@ -51,10 +57,13 @@ Examples:
   # Start a new project
   arc init "Build a REST API for a todo app"
   
-  # Add tasks to the backlog
-  arc add "Set up Express server with TypeScript"
-  arc add "Create Todo model with CRUD operations"
-  arc add "Add authentication middleware"
+  # Add tasks WITH verification (enables Ralph loop)
+  arc add "Set up Express server" --verify "curl -s localhost:3000/health"
+  arc add "Create Todo CRUD API" --verify "bun test src/todo.test.ts"
+  arc add "Add JWT authentication" --verify "curl -s -H 'Authorization: Bearer test' localhost:3000/me"
+  
+  # Add task without verification (will need manual review)
+  arc add "Write API documentation"
   
   # Run one iteration
   arc iterate
@@ -83,6 +92,10 @@ interface Args {
   command: Command
   goal?: string                // For init
   taskDescription?: string     // For add
+  acceptanceCriteria?: string  // For add --verify
+  why?: string                 // For add --why
+  size?: "small" | "medium" | "large"  // For add --size
+  insertTop?: boolean          // For add --top
   planFile?: string            // For run (legacy)
   loadFile?: string            // For plan (legacy)
   crankMode: boolean
@@ -127,6 +140,22 @@ const parseArgs = (argv: string[]): Args => {
         if (argv[i + 1] && !argv[i + 1].startsWith("-")) {
           args.taskDescription = argv[++i]
         }
+        break
+      case "--verify":
+      case "-v":
+        args.acceptanceCriteria = argv[++i]
+        break
+      case "--why":
+        args.why = argv[++i]
+        break
+      case "--size":
+        const sizeArg = argv[++i]?.toLowerCase()
+        if (sizeArg && ["small", "medium", "large"].includes(sizeArg)) {
+          args.size = sizeArg as "small" | "medium" | "large"
+        }
+        break
+      case "--top":
+        args.insertTop = true
         break
       case "status":
         args.command = "status"
@@ -251,12 +280,16 @@ const main = async () => {
     case "add": {
       if (!args.taskDescription) {
         console.error("Error: Task description required")
-        console.error('Usage: arc add "Your task description"')
+        console.error('Usage: arc add "Your task description" [--verify "command"]')
         process.exit(1)
       }
       const { runAddCommand } = await import("./commands/add")
       await Effect.runPromise(runAddCommand(args.taskDescription, {
         projectFile: args.projectFile,
+        acceptanceCriteria: args.acceptanceCriteria,
+        why: args.why,
+        size: args.size,
+        top: args.insertTop,
       }))
       break
     }

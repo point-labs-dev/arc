@@ -59,6 +59,13 @@ export const runAddCommand = (
     if (options.size) {
       console.log(`📏 Size: ${options.size}`)
     }
+    if (options.acceptanceCriteria) {
+      console.log(`✓  Verify: ${options.acceptanceCriteria}`)
+    } else {
+      console.log(`⚠️  No acceptance criteria - will need manual verification`)
+      console.log(`   Tip: Add verification command for auto-verify`)
+      console.log(`   Example: arc add "Build API" --verify "curl localhost:3000/health"`)
+    }
     console.log(``)
     console.log(`Backlog now has ${updatedProject.backlog.length} task(s)`)
     console.log(`Run 'arc iterate' to work on the next task`)
