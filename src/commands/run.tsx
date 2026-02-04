@@ -14,6 +14,7 @@ import Spinner from "ink-spinner"
 import TextInput from "ink-text-input"
 import React, { useState, useEffect, useCallback, useRef } from "react"
 import * as fs from "fs"
+import * as path from "path"
 import type { Plan, Step } from "../types/plan"
 import { getCurrentStep, isComplete } from "../types/plan"
 import {
@@ -58,10 +59,46 @@ type UIState =
   | { type: "complete" }
   | { type: "error"; message: string }
 
+// === Context File Loading ===
+
+/**
+ * Load AGENTS.md or CLAUDE.md from the working directory.
+ * Prefers AGENTS.md, falls back to CLAUDE.md.
+ */
+const loadAgentContext = (cwd: string): string | null => {
+  const agentsMdPath = path.join(cwd, "AGENTS.md")
+  const claudeMdPath = path.join(cwd, "CLAUDE.md")
+  
+  if (fs.existsSync(agentsMdPath)) {
+    try {
+      return fs.readFileSync(agentsMdPath, "utf-8")
+    } catch {
+      return null
+    }
+  }
+  
+  if (fs.existsSync(claudeMdPath)) {
+    try {
+      return fs.readFileSync(claudeMdPath, "utf-8")
+    } catch {
+      return null
+    }
+  }
+  
+  return null
+}
+
 // === Prompt Builder ===
 
-const buildStepPrompt = (step: Step, plan: Plan): string => {
+const buildStepPrompt = (step: Step, plan: Plan, cwd: string): string => {
   const parts: string[] = []
+
+  // Load AGENTS.md or CLAUDE.md context
+  const agentContext = loadAgentContext(cwd)
+  if (agentContext) {
+    parts.push(`# Project Context\n\n${agentContext}`)
+    parts.push("---\n")
+  }
 
   // Main task
   parts.push(`# Task
@@ -121,11 +158,12 @@ const createExecutor = (
   onOutput: (text: string) => void
 ) => async (step: Step, context: ExecutionContext): Promise<ExecutionResult> => {
   
-  // Build prompt with context from previous attempts
-  const basePrompt = context.promptOverride || buildStepPrompt(step, context.plan)
-  const prompt = buildContextualPrompt(basePrompt, context.previousAttempts)
-
+  const cwd = process.cwd()
   const agentInfo = AGENTS[config.agent]
+  
+  // Build prompt with context from previous attempts
+  const basePrompt = context.promptOverride || buildStepPrompt(step, context.plan, cwd)
+  const prompt = buildContextualPrompt(basePrompt, context.previousAttempts)
   
   onOutput(`\n${"─".repeat(60)}\n`)
   onOutput(`📍 Step: ${step.description}\n`)
@@ -144,7 +182,7 @@ const createExecutor = (
   // Configure agent
   const agentConfig: AgentConfig = {
     agent: config.agent,
-    cwd: process.cwd(),
+    cwd,
     autoApprove: config.autoApprove,
     timeout: 300000, // 5 minutes
     provider: config.provider,
@@ -382,7 +420,7 @@ const RunApp: React.FC<RunAppProps> = ({ plan: initialPlan, config, onComplete }
         case "t":
           const step = currentStepRef.current
           if (step) {
-            const prompt = buildStepPrompt(step, plan)
+            const prompt = buildStepPrompt(step, plan, process.cwd())
             setTuneText(prompt)
             setUIState({ type: "tune", currentPrompt: prompt })
           }
@@ -575,7 +613,7 @@ export const runRunCommand = (
       return
     }
 
-    const agent = options.agent ?? "codex"
+    const agent = options.agent ?? "claude-code"
     const agentInfo = AGENTS[agent]
 
     const config: RunConfig = {
@@ -589,10 +627,19 @@ export const runRunCommand = (
       autoApprove: options.autoApprove ?? false,
     }
 
+    // Check for context files
+    const cwd = process.cwd()
+    const hasAgentsMd = fs.existsSync(path.join(cwd, "AGENTS.md"))
+    const hasClaudeMd = fs.existsSync(path.join(cwd, "CLAUDE.md"))
+    const contextFile = hasAgentsMd ? "AGENTS.md" : hasClaudeMd ? "CLAUDE.md" : null
+
     console.log(`\n⚡ Arc - Agent-Agnostic Execution`)
     console.log(`📋 Plan: ${plan.name}`)
     console.log(`🤖 Agent: ${agentInfo.name}${config.provider ? ` (${config.provider})` : ""}`)
     console.log(`📊 ${plan.steps.length} steps`)
+    if (contextFile) {
+      console.log(`📄 Context: ${contextFile}`)
+    }
     console.log(`🔧 Mode: ${config.crankMode ? "Hand-crank" : "Continuous"}${config.autoApprove ? " [auto-approve]" : ""}`)
     console.log(`🔄 Max ${config.maxIterationsPerStep} iterations/step, ${config.maxNoChangeIterations} no-change limit\n`)
 

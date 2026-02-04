@@ -42,7 +42,7 @@ Agents:
 Examples:
   arc plan                              Start a new planning session
   arc plan --load plan.json             Resume planning from file
-  arc run plan.json                     Execute with default agent (codex)
+  arc run plan.json                     Execute with default agent (claude-code)
   arc run plan.json --agent pi          Execute with Pi
   arc run plan.json --agent codex       Execute with Codex
   arc run plan.json --crank             Execute with hand-crank mode
@@ -87,7 +87,7 @@ const parseArgs = (argv: string[]): Args => {
     maxIterations: 5,
     maxNoChange: 3,
     maxTotal: 50,
-    agent: "codex", // Default to Codex
+    agent: "claude-code", // Default to Claude Code
     autoApprove: false,
   }
 
