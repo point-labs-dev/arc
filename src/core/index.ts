@@ -1,8 +1,10 @@
 /**
- * Core Module Exports
+ * Core Module
+ * 
+ * Exports the iteration loop, project store, and utilities.
  */
 
 export * from "./ralph"
 export * from "./diff"
-// Legacy loop (Phase 1) - keeping for reference
-// export * from "./loop"
+export * from "./iterate"
+export * from "./project-store"

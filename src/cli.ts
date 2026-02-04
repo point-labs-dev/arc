@@ -2,92 +2,104 @@
 /**
  * Arc CLI
  * 
+ * Rapid iteration product development agent.
+ * 
  * Commands:
- *   arc plan                - Start planning UI
- *   arc run plan.json       - Execute plan via Pi
- *   arc run plan.json --crank  - Execute one iteration at a time
+ *   arc init "goal"           Initialize a new project
+ *   arc iterate               Run one iteration (pick task, build, verify, learn)
+ *   arc go                    Keep iterating until done or blocked
+ *   arc add "task"            Add a task to the backlog
+ *   arc status                Show project status
+ *   arc plan                  Start planning UI (legacy)
+ *   arc run plan.json         Execute a static plan (legacy)
  */
 
 import { Effect } from "effect"
 
 const HELP = `
-Arc - Agentic Coding Orchestrator
+Arc - Rapid Iteration Product Development Agent
 
-Energy in, shaped code out. Iteration over iteration until it's right.
+Idea → Plan a piece → Build → Verify → Learn → Repeat
 
 Usage:
-  arc plan [--load <file>]     Start planning UI
-  arc run <plan.json>          Execute plan (continuous)
-  arc run <plan.json> --crank  Execute plan (hand-crank mode)
-  arc status                   Show execution status
+  arc init "<goal>"            Initialize a new project with a goal
+  arc iterate                  Run one iteration (build next task)
+  arc go                       Keep iterating until done or blocked
+  arc add "<task>"             Add a task to the backlog
+  arc status                   Show project status and progress
+  arc backlog                  Show the task backlog
+  arc insights                 Show learnings and insights
+  arc plan                     Start planning UI (legacy)
+  arc run <plan.json>          Execute a static plan (legacy)
   arc --help                   Show this help
 
 Options:
   --agent <name>       Coding agent to use (codex, claude-code, opencode, pi)
-  --crank              Hand-crank mode: pause after each iteration
-  --max-iter <n>       Max iterations per step (default: 5)
-  --max-no-change <n>  Circuit breaker: max no-change iterations (default: 3)
-  --max-total <n>      Max total iterations across all steps (default: 50)
-  --load <file>        Load existing plan for editing
+  --max-attempts <n>   Max attempts per task (default: 5)
   --provider <name>    LLM provider for Pi (anthropic, openai, google, etc.)
   --model <id>         Model ID for Pi
   --auto-approve       Auto-approve changes (--yolo mode for Codex)
+  --project <file>     Project file (default: arc-project.json)
 
 Agents:
-  codex        OpenAI Codex CLI (gpt-5.2-codex) - install: npm i -g @openai/codex
-  claude-code  Anthropic Claude Code - install: npm i -g @anthropic-ai/claude-code
-  opencode     OpenCode - install: npm i -g opencode
-  pi           Pi Coding Agent - install: npm i -g @mariozechner/pi-coding-agent
+  codex        OpenAI Codex CLI (gpt-5.2-codex)
+  claude-code  Anthropic Claude Code [default]
+  opencode     OpenCode
+  pi           Pi Coding Agent (multi-provider)
 
 Examples:
-  arc plan                              Start a new planning session
-  arc plan --load plan.json             Resume planning from file
-  arc run plan.json                     Execute with default agent (claude-code)
-  arc run plan.json --agent pi          Execute with Pi
-  arc run plan.json --agent codex       Execute with Codex
-  arc run plan.json --crank             Execute with hand-crank mode
-  arc run plan.json --agent pi --provider openai   Pi with OpenAI
+  # Start a new project
+  arc init "Build a REST API for a todo app"
+  
+  # Add tasks to the backlog
+  arc add "Set up Express server with TypeScript"
+  arc add "Create Todo model with CRUD operations"
+  arc add "Add authentication middleware"
+  
+  # Run one iteration
+  arc iterate
+  
+  # Keep going until done
+  arc go
+  
+  # Check progress
+  arc status
 
 Philosophy:
-  Arc orchestrates coding agents in a continuous loop until the task is complete.
-  Like an electric arc shaping metal, or a story arc reaching its conclusion.
-  
-  Hand-crank mode lets you observe and tune the agent like a guitar.
-  Each time Arc does something wrong, you adjust the prompt.
-  Eventually, Arc learns all the signs.
+  Plan a little, build a little, learn, repeat.
+  The plan evolves with each iteration.
+  Rapid cycles over big upfront design.
 
 Architecture:
-  Arc (planning, orchestration)
+  Arc (orchestration, iteration loop)
     → Agent (Codex, Claude Code, OpenCode, Pi)
       → LLM (Claude, GPT, Gemini, etc.)
-
-Inspired by: https://ghuntley.com/ralph
 `
 
 type AgentType = "codex" | "claude-code" | "opencode" | "pi"
+type Command = "init" | "iterate" | "go" | "add" | "status" | "backlog" | "insights" | "plan" | "run" | "help"
 
 interface Args {
-  command: "plan" | "run" | "status" | "help"
-  planFile?: string
-  loadFile?: string
+  command: Command
+  goal?: string                // For init
+  taskDescription?: string     // For add
+  planFile?: string            // For run (legacy)
+  loadFile?: string            // For plan (legacy)
   crankMode: boolean
-  maxIterations: number
-  maxNoChange: number
-  maxTotal: number
+  maxAttempts: number
   agent: AgentType
   provider?: string
   model?: string
   autoApprove: boolean
+  projectFile?: string
 }
 
 const parseArgs = (argv: string[]): Args => {
   const args: Args = {
     command: "help",
     crankMode: false,
-    maxIterations: 5,
-    maxNoChange: 3,
-    maxTotal: 50,
-    agent: "claude-code", // Default to Claude Code
+    maxAttempts: 5,
+    agent: "claude-code",
     autoApprove: false,
   }
 
@@ -96,18 +108,43 @@ const parseArgs = (argv: string[]): Args => {
     const arg = argv[i]
 
     switch (arg) {
+      case "init":
+        args.command = "init"
+        // Next arg should be the goal
+        if (argv[i + 1] && !argv[i + 1].startsWith("-")) {
+          args.goal = argv[++i]
+        }
+        break
+      case "iterate":
+        args.command = "iterate"
+        break
+      case "go":
+        args.command = "go"
+        break
+      case "add":
+        args.command = "add"
+        // Next arg should be the task description
+        if (argv[i + 1] && !argv[i + 1].startsWith("-")) {
+          args.taskDescription = argv[++i]
+        }
+        break
+      case "status":
+        args.command = "status"
+        break
+      case "backlog":
+        args.command = "backlog"
+        break
+      case "insights":
+        args.command = "insights"
+        break
       case "plan":
         args.command = "plan"
         break
       case "run":
         args.command = "run"
-        // Next arg should be plan file
         if (argv[i + 1] && !argv[i + 1].startsWith("-")) {
           args.planFile = argv[++i]
         }
-        break
-      case "status":
-        args.command = "status"
         break
       case "--help":
       case "-h":
@@ -117,19 +154,9 @@ const parseArgs = (argv: string[]): Args => {
       case "-c":
         args.crankMode = true
         break
-      case "--max-iter":
+      case "--max-attempts":
       case "-m":
-        args.maxIterations = parseInt(argv[++i] || "5")
-        break
-      case "--max-no-change":
-        args.maxNoChange = parseInt(argv[++i] || "3")
-        break
-      case "--max-total":
-        args.maxTotal = parseInt(argv[++i] || "50")
-        break
-      case "--load":
-      case "-l":
-        args.loadFile = argv[++i]
+        args.maxAttempts = parseInt(argv[++i] || "5")
         break
       case "--agent":
       case "-a":
@@ -151,9 +178,17 @@ const parseArgs = (argv: string[]): Args => {
       case "--yolo":
         args.autoApprove = true
         break
+      case "--project":
+      case "-p":
+        args.projectFile = argv[++i]
+        break
+      case "--load":
+      case "-l":
+        args.loadFile = argv[++i]
+        break
       default:
+        // Check for positional args
         if (!arg.startsWith("-") && args.command === "help") {
-          // First positional arg might be plan file
           if (arg.endsWith(".json")) {
             args.command = "run"
             args.planFile = arg
@@ -174,6 +209,82 @@ const main = async () => {
       console.log(HELP)
       process.exit(0)
 
+    case "init": {
+      if (!args.goal) {
+        console.error("Error: Goal required")
+        console.error('Usage: arc init "Your project goal"')
+        process.exit(1)
+      }
+      const { runInitCommand } = await import("./commands/init")
+      await Effect.runPromise(runInitCommand(args.goal, {
+        projectFile: args.projectFile,
+      }))
+      break
+    }
+
+    case "iterate": {
+      const { runIterateCommand } = await import("./commands/iterate")
+      await Effect.runPromise(runIterateCommand({
+        agent: args.agent,
+        maxAttempts: args.maxAttempts,
+        provider: args.provider,
+        model: args.model,
+        autoApprove: args.autoApprove,
+        projectFile: args.projectFile,
+      }))
+      break
+    }
+
+    case "go": {
+      const { runGoCommand } = await import("./commands/go")
+      await Effect.runPromise(runGoCommand({
+        agent: args.agent,
+        maxAttempts: args.maxAttempts,
+        provider: args.provider,
+        model: args.model,
+        autoApprove: args.autoApprove,
+        projectFile: args.projectFile,
+      }))
+      break
+    }
+
+    case "add": {
+      if (!args.taskDescription) {
+        console.error("Error: Task description required")
+        console.error('Usage: arc add "Your task description"')
+        process.exit(1)
+      }
+      const { runAddCommand } = await import("./commands/add")
+      await Effect.runPromise(runAddCommand(args.taskDescription, {
+        projectFile: args.projectFile,
+      }))
+      break
+    }
+
+    case "status": {
+      const { runStatusCommand } = await import("./commands/status")
+      await Effect.runPromise(runStatusCommand({
+        projectFile: args.projectFile,
+      }))
+      break
+    }
+
+    case "backlog": {
+      const { runBacklogCommand } = await import("./commands/backlog")
+      await Effect.runPromise(runBacklogCommand({
+        projectFile: args.projectFile,
+      }))
+      break
+    }
+
+    case "insights": {
+      const { runInsightsCommand } = await import("./commands/insights")
+      await Effect.runPromise(runInsightsCommand({
+        projectFile: args.projectFile,
+      }))
+      break
+    }
+
     case "plan": {
       const { runPlanCommand } = await import("./commands/plan")
       await Effect.runPromise(runPlanCommand(args.loadFile))
@@ -190,9 +301,9 @@ const main = async () => {
       await Effect.runPromise(
         runRunCommand(args.planFile, {
           crank: args.crankMode,
-          maxIterations: args.maxIterations,
-          maxNoChange: args.maxNoChange,
-          maxTotal: args.maxTotal,
+          maxIterations: args.maxAttempts,
+          maxNoChange: 3,
+          maxTotal: 50,
           agent: args.agent,
           provider: args.provider,
           model: args.model,
@@ -200,11 +311,6 @@ const main = async () => {
         })
       )
       break
-    }
-
-    case "status": {
-      console.log("Status command not yet implemented")
-      process.exit(1)
     }
   }
 }
