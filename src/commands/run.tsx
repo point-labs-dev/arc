@@ -62,10 +62,42 @@ type UIState =
 // === Context File Loading ===
 
 /**
+ * Ensure both AGENTS.md and CLAUDE.md exist (symlinked).
+ * If only one exists, create a symlink for the other.
+ * This follows OpenClaw's convention.
+ */
+const ensureContextSymlinks = (cwd: string): void => {
+  const agentsMdPath = path.join(cwd, "AGENTS.md")
+  const claudeMdPath = path.join(cwd, "CLAUDE.md")
+  
+  const agentsExists = fs.existsSync(agentsMdPath)
+  const claudeExists = fs.existsSync(claudeMdPath)
+  
+  if (agentsExists && !claudeExists) {
+    // Create CLAUDE.md -> AGENTS.md symlink
+    try {
+      fs.symlinkSync("AGENTS.md", claudeMdPath)
+    } catch {
+      // Ignore symlink errors (permissions, etc.)
+    }
+  } else if (claudeExists && !agentsExists) {
+    // Create AGENTS.md -> CLAUDE.md symlink
+    try {
+      fs.symlinkSync("CLAUDE.md", agentsMdPath)
+    } catch {
+      // Ignore symlink errors
+    }
+  }
+}
+
+/**
  * Load AGENTS.md or CLAUDE.md from the working directory.
  * Prefers AGENTS.md, falls back to CLAUDE.md.
  */
 const loadAgentContext = (cwd: string): string | null => {
+  // Ensure symlinks exist for both names
+  ensureContextSymlinks(cwd)
+  
   const agentsMdPath = path.join(cwd, "AGENTS.md")
   const claudeMdPath = path.join(cwd, "CLAUDE.md")
   
