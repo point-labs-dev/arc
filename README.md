@@ -1,125 +1,127 @@
 # Arc ⚡
 
-> Energy in, shaped code out. Iteration over iteration until it's right.
+> Rapid iteration product development agent.
 
-An agentic coding orchestrator with a planning-first approach.
+**Idea → Plan a piece → Build → Verify → Learn → Repeat**
+
+Arc is an AI-powered coding orchestrator that emphasizes small, verified increments over big upfront planning. It wraps coding agents (Claude Code, Codex, Pi, OpenCode) in a verification loop that iterates until tasks are complete.
 
 ## Philosophy
 
-```bash
-while :; do cat PROMPT.md | claude-code ; done
+```
+Plan a little, build a little, learn, repeat.
 ```
 
-Arc is a technique. In its purest form, it's a loop. The beauty of Arc is that it's **deterministically bad in an undeterministic world**.
-
-Each time Arc does something wrong, you tune it—like a guitar. Eventually, Arc learns all the signs.
-
-## Why "Arc"?
-
-- ⚡ **Electric arc** — energy/tokens transformed into output
-- 📐 **Architecture** — design thinking, structured approach
-- 🏛️ **Pointed arch** — the foundation of Point Labs
-- 📈 **Story arc** — iteration toward completion
-
-## Features
-
-- **Planning Phase** - Interactive UI to build execution plans collaboratively with AI
-- **Execution Phase** - Arc loop that runs until the plan is complete
-- **Hand-Crank Mode** - Pause after each iteration to observe and tune
-- **Full Observability** - See everything the agent does
-- **Verification** - QA, testing, and review built into every step
+- **No big upfront planning** — plan just the next piece
+- **Verification-driven** — tasks need acceptance criteria to auto-verify
+- **Learn from failures** — each retry includes context from previous attempts
+- **Track progress** — insights and learnings persist across sessions
 
 ## Quick Start
 
 ```bash
-# Install dependencies
+# Install
 bun install
 
-# Set your API key
-export ANTHROPIC_API_KEY=sk-ant-...
+# Initialize a project
+arc init "Build a REST API for a todo app"
 
-# Start planning
-bun run plan
+# Add tasks with verification
+arc add "Set up Express server" --verify "curl -s localhost:3000/health"
+arc add "Create Todo CRUD API" --verify "bun test src/todo.test.ts"
 
-# Execute a plan (continuous mode)
-bun run run plan.json
+# Run one iteration
+arc iterate
 
-# Execute with hand-cranking
-bun run crank plan.json
+# Or keep going until done
+arc go
+
+# Check progress
+arc status
 ```
-
-## Modes
-
-### Continuous Mode (Arc Mode)
-```bash
-arc run plan.json
-```
-Runs the loop until the plan is complete or the circuit breaker triggers.
-
-### Hand-Crank Mode
-```bash
-arc run plan.json --crank
-```
-Pauses after each iteration. Options:
-- `[C]ontinue` - Run next iteration
-- `[R]eview` - Review changes before continuing  
-- `[T]une` - Modify the prompt/context
-- `[S]top` - Stop execution
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `arc plan` | Start planning UI |
-| `arc plan --load plan.json` | Resume existing plan |
-| `arc run plan.json` | Execute plan (continuous) |
-| `arc run plan.json --crank` | Execute plan (hand-crank) |
-| `arc status` | Show execution status |
+| `arc init "<goal>"` | Initialize a project with a goal |
+| `arc add "<task>" --verify "<cmd>"` | Add task with verification |
+| `arc iterate` | Run one iteration |
+| `arc go` | Keep iterating until done |
+| `arc status` | Show project progress |
+| `arc backlog` | Show task list |
+| `arc insights` | Show learnings |
 
-## Environment Variables
+## Verification
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes* | Claude API key |
-| `OPENAI_API_KEY` | Yes* | OpenAI API key |
-| `ARC_PROVIDER` | No | Default: `anthropic` |
-| `ARC_MODEL` | No | Default: `claude-sonnet-4-20250514` |
+Tasks with verification commands (`--verify`) run in the Ralph loop:
 
-\* At least one API key is required
-
-## Plan Format
-
-```json
-{
-  "id": "uuid",
-  "name": "Feature Name",
-  "description": "What we're building",
-  "context": {
-    "files": ["src/main.ts"],
-    "notes": "Additional context"
-  },
-  "steps": [
-    {
-      "id": "step-1",
-      "description": "Implement the core logic",
-      "verification": {
-        "type": "exit_code_0",
-        "command": "bun test"
-      },
-      "status": "pending"
-    }
-  ]
-}
+```
+Build → Run verify command → Pass? ✓ Done : Retry with context
 ```
 
-## Inspiration
+Tasks without verification complete after one attempt but are flagged for manual review.
 
-- [Geoff Huntley's Ralph](https://ghuntley.com/ralph) - The original technique
-- [Effect.ts](https://effect.website) - Functional programming patterns
+```bash
+# ✅ Good - can auto-verify
+arc add "Build health endpoint" --verify "curl -s localhost:3000/health"
+
+# ⚠️ Needs manual review
+arc add "Write documentation"
+```
+
+## Supported Agents
+
+| Agent | Description | Flag |
+|-------|-------------|------|
+| Claude Code | Anthropic Claude | `--agent claude-code` (default) |
+| Codex | OpenAI Codex CLI | `--agent codex` |
+| Pi | Multi-provider agent | `--agent pi` |
+| OpenCode | Open-source agent | `--agent opencode` |
+
+## Project Structure
+
+```
+arc/
+├── src/
+│   ├── cli.ts                 # Command-line interface
+│   ├── commands/              # Command implementations
+│   │   ├── init.ts           # arc init
+│   │   ├── add.ts            # arc add
+│   │   ├── iterate.ts        # arc iterate
+│   │   ├── go.ts             # arc go
+│   │   ├── status.ts         # arc status
+│   │   └── ...
+│   ├── core/
+│   │   ├── iterate.ts        # Iteration loop
+│   │   ├── project-store.ts  # Project persistence
+│   │   └── ...
+│   ├── agents/               # Agent abstraction layer
+│   │   ├── types.ts          # Agent types
+│   │   └── spawn.ts          # PTY spawning
+│   └── types/
+│       └── project.ts        # Project/Task/Insight types
+├── specs/                     # Design specifications
+│   └── README.md             # Spec index
+└── arc-project.json          # Your project state (created by arc init)
+```
+
+## Specifications
+
+Design documentation lives in `specs/`. See [specs/README.md](./specs/README.md) for a complete index.
+
+Key specs:
+- [ITERATION-LOOP](./specs/ITERATION-LOOP.md) — The core development loop
+- [PROJECT-MODEL](./specs/PROJECT-MODEL.md) — Data structures
+- [VERIFICATION](./specs/VERIFICATION.md) — How tasks are verified
+- [AGENT-ABSTRACTION](./specs/AGENT-ABSTRACTION.md) — Multi-agent support
 
 ## Development
 
 ```bash
+# Install dependencies
+bun install
+
 # Run in dev mode
 bun run dev
 
@@ -128,15 +130,23 @@ bun run typecheck
 
 # Run tests
 bun test
-
-# Build for distribution
-bun run build
 ```
 
-## License
+## Architecture
 
-MIT
+```
+Arc (orchestration, iteration loop)
+  → Agent (Codex, Claude Code, OpenCode, Pi)
+    → LLM (Claude, GPT, Gemini, etc.)
+```
+
+Arc provides the structure. Agents do the coding. The loop keeps going until verification passes.
+
+## Inspiration
+
+- [Geoff Huntley's Ralph](https://ghuntley.com/ralph) — The original technique
+- [OpenClaw](https://github.com/openclaw/openclaw) — Agent infrastructure
 
 ---
 
-*"The arc of iteration bends toward working code."* ⚡
+*"Plan a little, build a little, learn, repeat."* ⚡
