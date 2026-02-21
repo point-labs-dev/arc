@@ -1,0 +1,28 @@
+{
+  "name": "@point-labs/arc-engine",
+  "version": "0.1.0",
+  "description": "DOT-based pipeline runner for AI workflows — Attractor-compatible",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src/",
+    "format": "biome format src/",
+    "format:check": "biome check src/",
+    "check": "biome check src/ && oxlint src/ && tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "^3.14.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "oxlint": "^0.16.0",
+    "@biomejs/biome": "^1.9.0",
+    "@types/node": "^22.0.0"
+  }
+}
