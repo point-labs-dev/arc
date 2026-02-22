@@ -3,8 +3,11 @@
   "version": "0.1.0",
   "description": "Pi RPC backend for Arc — implements CodergenBackend via pi --mode rpc",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",

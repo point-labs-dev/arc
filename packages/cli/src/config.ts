@@ -32,7 +32,7 @@ export const DEFAULT_ARC_CONFIG: ArcProjectConfig = {
     eventsLogPath: "progress/events.ndjson",
   },
   backend: {
-    mode: "mock",
+    mode: "pi",
     timeout: 1800,
   },
   humanGate: {

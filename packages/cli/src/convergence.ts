@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 
-import { MockBackendFactory } from "./backend"
+import { createBackendFactory } from "./backend"
 import { loadArcConfig } from "./config"
 import { createEvent, type ArcEventSink, CompositeArcEventSink, NdjsonArcEventSink } from "./events"
 import { collectProjectSnapshot, type GitClient, ShellGitClient } from "./git"
@@ -64,7 +64,7 @@ export const runConvergence = async (
     }),
   )
 
-  const backendFactory = options.backendFactory ?? new MockBackendFactory()
+  const backendFactory = options.backendFactory ?? createBackendFactory(config)
   const verificationRunner = options.verificationRunner ?? runVerification
 
   let currentProgress = progress
