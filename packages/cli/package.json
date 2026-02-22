@@ -1,0 +1,32 @@
+{
+  "name": "@point-labs/arc-cli",
+  "version": "0.1.0",
+  "description": "CLI and orchestrator for Arc software factory",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "arc": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src/",
+    "format": "biome format src/",
+    "format:check": "biome check src/",
+    "check": "biome check src/ && oxlint src/ && tsc --noEmit"
+  },
+  "dependencies": {
+    "@point-labs/arc-engine": "file:../engine",
+    "@point-labs/arc-pi-backend": "file:../pi-backend",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@types/node": "^22.0.0",
+    "oxlint": "^0.16.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  }
+}

@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@point-labs/arc-engine": "workspace:*",
+    "@point-labs/arc-engine": "file:../engine",
     "effect": "^3.14.0"
   },
   "devDependencies": {
