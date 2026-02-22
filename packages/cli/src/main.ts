@@ -3,10 +3,11 @@
 import { runCli } from "./index"
 
 const result = await runCli(process.argv.slice(2))
-if (result.ok) {
-  process.stdout.write(`${result.message}\n`)
-  process.exit(0)
+if (result.stdout.trim().length > 0) {
+  process.stdout.write(`${result.stdout}\n`)
+}
+if (result.stderr !== undefined && result.stderr.trim().length > 0) {
+  process.stderr.write(`${result.stderr}\n`)
 }
 
-process.stderr.write(`${result.message}\n`)
-process.exit(1)
+process.exit(result.exitCode)
