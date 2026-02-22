@@ -63,6 +63,7 @@ export interface EvaluateSatisfactionOptions {
   readonly input: SatisfactionInput
   readonly threshold?: number
   readonly judge?: SatisfactionJudge
+  readonly allow_heuristic_fallback?: boolean
   readonly on_event?: (event: SatisfactionEvent) => Promise<void> | void
 }
 
@@ -93,7 +94,14 @@ export const evaluateSatisfaction = async (
   options: EvaluateSatisfactionOptions,
 ): Promise<SatisfactionResult> => {
   const threshold = clampToUnitInterval(options.threshold ?? DEFAULT_SATISFACTION_THRESHOLD)
-  const judge = options.judge ?? heuristicSatisfactionJudge
+  const judge =
+    options.judge ??
+    (options.allow_heuristic_fallback === true ? heuristicSatisfactionJudge : undefined)
+  if (judge === undefined) {
+    throw new SatisfactionConfigurationError(
+      "Satisfaction judge is not configured. Provide a judge or set allow_heuristic_fallback=true.",
+    )
+  }
   const judgement = await judge.judge(options.input)
   const score = clampToUnitInterval(judgement.score)
   const result: SatisfactionResult = {

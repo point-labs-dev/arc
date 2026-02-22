@@ -43,6 +43,28 @@ describe("evaluateSatisfaction", () => {
     expect(result.passed).toBe(true)
   })
 
+  it("throws when no judge is configured and heuristic fallback is not explicitly enabled", async () => {
+    await expect(
+      evaluateSatisfaction({
+        input,
+      }),
+    ).rejects.toThrow(SatisfactionConfigurationError)
+  })
+
+  it("uses heuristic judge when explicit fallback is enabled", async () => {
+    const expected = heuristicSatisfactionJudge.judge(input)
+
+    const result = await evaluateSatisfaction({
+      input,
+      threshold: 0.8,
+      allow_heuristic_fallback: true,
+    })
+
+    expect(result.score).toBe(expected.score)
+    expect(result.rationale).toBe(expected.rationale)
+    expect(result.passed).toBe(expected.score >= result.threshold)
+  })
+
   it("emits satisfaction_score events", async () => {
     const events: SatisfactionEvent[] = []
     const result = await evaluateSatisfaction({

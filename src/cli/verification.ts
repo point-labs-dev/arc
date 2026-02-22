@@ -222,6 +222,7 @@ const runSatisfactionVerification = async (input: {
     },
     threshold: input.threshold,
     judge,
+    allow_heuristic_fallback: input.command === undefined,
   })
 
   await input.eventSink.emit(
