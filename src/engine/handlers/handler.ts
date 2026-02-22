@@ -9,10 +9,10 @@ import { type CodergenBackend, CodergenHandler } from "./codergen"
 import { ConditionalHandler } from "./conditional"
 import { ExitHandler } from "./exit"
 import { FanInHandler } from "./fan-in"
+import { ManagerLoopHandler } from "./manager-loop"
 import { ParallelHandler } from "./parallel"
 import { StartHandler } from "./start"
 import { ToolHandler, type ToolRunner } from "./tool"
-import { UnsupportedHandler } from "./unsupported"
 import { WaitForHumanHandler } from "./wait-human"
 
 export interface Handler {
@@ -91,7 +91,7 @@ export const createDefaultHandlerRegistry = (
     }),
   )
   registry.register("parallel.fan_in", new FanInHandler())
-  registry.register("stack.manager_loop", new UnsupportedHandler("stack.manager_loop"))
+  registry.register("stack.manager_loop", new ManagerLoopHandler({ sleep: dependencies.sleep }))
 
   return registry
 }
