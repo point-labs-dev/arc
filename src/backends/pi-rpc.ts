@@ -41,9 +41,10 @@ export interface PiRpcBackendOptions {
 export class PiRpcBackend implements CodergenBackend {
   constructor(private readonly options: PiRpcBackendOptions = {}) {}
 
-  async run(node: GraphNode, prompt: string, _context: PipelineContext): Promise<string | Outcome> {
+  async run(node: GraphNode, prompt: string, context: PipelineContext): Promise<string | Outcome> {
     const launch = this.resolveLaunchCommand(node)
     const timeoutMs = this.resolveTimeout(node)
+    const message = interpolatePromptContext(prompt, context)
 
     const child = spawn(launch.command, [...launch.args], {
       stdio: "pipe",
@@ -55,7 +56,7 @@ export class PiRpcBackend implements CodergenBackend {
     try {
       await sendCommand(child, {
         type: "prompt",
-        message: prompt,
+        message,
       })
 
       const timeoutPromise = createTimeout(timeoutMs)
@@ -87,8 +88,14 @@ export class PiRpcBackend implements CodergenBackend {
     const executable = this.options.executable ?? "pi"
     const provider = readStringAttr(node.attrs.llm_provider) ?? this.options.defaultProvider ?? DEFAULT_PROVIDER
     const model = readStringAttr(node.attrs.llm_model) ?? this.options.defaultModel ?? DEFAULT_MODEL
+    const reasoningEffort = readReasoningEffortAttr(node.attrs.reasoning_effort)
 
-    const args = ["--mode", "rpc", "--provider", provider, "--model", model, "--no-session"]
+    const args = ["--mode", "rpc", "--provider", provider, "--model", model]
+    if (reasoningEffort !== undefined) {
+      args.push("--reasoning-effort", reasoningEffort)
+    }
+    args.push("--no-session")
+
     return {
       command: executable,
       args: [...args, ...(this.options.extraArgs ?? [])],
@@ -223,6 +230,37 @@ type CompletionResult =
       readonly type: "timeout"
     }
 
+const CONTEXT_PROMPT_TOKEN_PATTERN =
+  /\$context\.([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)/g
+
+const interpolatePromptContext = (prompt: string, context: PipelineContext): string => {
+  if (!prompt.includes("$context.")) {
+    return prompt
+  }
+
+  return prompt.replace(CONTEXT_PROMPT_TOKEN_PATTERN, (_match, key: string) => {
+    const value = resolvePromptContextValue(context, key)
+    return promptValueToString(value)
+  })
+}
+
+const resolvePromptContextValue = (context: PipelineContext, key: string): unknown => {
+  const direct = context.get(key)
+  if (direct !== undefined) {
+    return direct
+  }
+
+  return context.get(`context.${key}`)
+}
+
+const promptValueToString = (value: unknown): string => {
+  if (value === undefined || value === null) {
+    return ""
+  }
+
+  return String(value)
+}
+
 const createTimeout = async (timeoutMs: number): Promise<CompletionResult> => {
   await new Promise<void>((resolve) => {
     setTimeout(resolve, timeoutMs)
@@ -340,6 +378,19 @@ const readStringAttr = (value: unknown): string | undefined => {
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+const readReasoningEffortAttr = (value: unknown): "low" | "medium" | "high" | undefined => {
+  const parsed = readStringAttr(value)
+  if (parsed === undefined) {
+    return undefined
+  }
+
+  if (parsed === "low" || parsed === "medium" || parsed === "high") {
+    return parsed
+  }
+
+  return undefined
 }
 
 const readDurationAttrMs = (value: unknown): number | undefined => {
