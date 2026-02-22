@@ -77,6 +77,8 @@ export class ParallelHandler implements Handler {
 
     const results = normalizeParallelBranchResults(branchResults)
     const joined = evaluateJoinPolicy(node, results, joinPolicy, errorPolicy)
+    // Branches execute against cloned contexts and may mutate branch-local state freely.
+    // Only these handler-level `context_updates` are merged back into the parent context.
     const contextUpdates: Record<string, unknown> = {
       "parallel.results": results,
       [`parallel.results.${node.id}`]: results,
@@ -188,7 +190,10 @@ export class ParallelHandler implements Handler {
     graph: GraphDefinition
     logsRoot?: string
   }): Promise<BranchExecutionResult> {
-    const branchContext = input.context.clone()
+    // Each branch gets an isolated snapshot of the parent context.
+    // This clone is used for branch-local edge selection and state, and is never
+    // merged wholesale back into the parent pipeline context.
+    let branchContext = input.context.clone()
     const completedNodes: string[] = []
 
     let currentNodeId = input.branchEdge.to
@@ -252,9 +257,16 @@ export class ParallelHandler implements Handler {
       }
 
       if (readAttributeBoolean(nextEdge.attrs, "loop_restart", false)) {
-        lastOutcome = failOutcome("loop_restart=true edges are not supported in branch execution")
-        reachedTermination = true
-        break
+        // Branch loop-restart is branch-local: reset branch state/context and continue
+        // at the target while preserving the same max-step budget for safety.
+        branchContext = input.context.clone()
+        completedNodes.length = 0
+        currentNodeId = nextEdge.to
+        terminalNodeId = currentNodeId
+        lastOutcome = successOutcome({
+          notes: `Branch "${input.branchEdge.to}" restarted at node "${nextEdge.to}"`,
+        })
+        continue
       }
 
       if (nextEdge.to === input.joinNodeId) {
@@ -399,6 +411,9 @@ const findCommonFanInNode = (graph: GraphDefinition, branches: GraphEdge[]): str
     return undefined
   }
 
+  // Deterministic fan-in selection:
+  // 1) Choose the reachable fan-in that minimizes total shortest-path distance across branches.
+  // 2) If distances tie, use lexical node-id order so selection stays stable across runs.
   return [...candidates].sort((left, right) => {
     const leftDistance = distancesByBranch.reduce(
       (sum, distances) => sum + (distances.get(left) ?? Number.MAX_SAFE_INTEGER),

@@ -10,7 +10,7 @@ import { type Outcome, normalizeOutcome } from "../context/outcome"
 import { NoopEventEmitter, type PipelineEventEmitter } from "../events/emitter"
 import type { PipelineEvent } from "../events/events"
 import { findNodeById, findStartNode, isTerminalNode, requireNodeById } from "../graph"
-import { writeStageStatusArtifact } from "../handlers/artifacts"
+import { listStageArtifactPaths, writeStageStatusArtifact } from "../handlers/artifacts"
 import type { CodergenBackend } from "../handlers/codergen"
 import {
   type DefaultHandlerDependencies,
@@ -40,6 +40,7 @@ export interface PipelineSatisfactionConfig {
   readonly threshold?: number
   readonly judge?: SatisfactionJudge
   readonly command_judge?: CommandSatisfactionJudgeOptions
+  readonly allow_heuristic_fallback?: boolean
 }
 
 export interface PipelineRunConfig {
@@ -80,6 +81,7 @@ interface ExecutionState {
   nodeRetries: Record<string, number>
   currentNodeId: string
   nodeExecutionCount: number
+  restartCount: number
 }
 
 export const runPipeline = async (
@@ -115,9 +117,14 @@ export const runPipeline = async (
     })
 
   const state = await initializeExecutionState(executionGraph, config, checkpointPath)
+  const restartContextSeed = {
+    values: state.context.snapshot(),
+    logs: state.context.logEntries(),
+  }
 
   try {
     while (true) {
+      const executionLogsRoot = resolveExecutionLogsRoot(config.logsRoot, state.restartCount)
       const currentNode = requireNodeById(executionGraph, state.currentNodeId)
       state.context.set("current_node", currentNode.id)
 
@@ -210,7 +217,7 @@ export const runPipeline = async (
         retryPolicy,
         nodeRetries: state.nodeRetries,
         context: state.context,
-        logsRoot: config.logsRoot,
+        logsRoot: executionLogsRoot,
         emitter,
         sleep: config.sleep,
         random: config.random,
@@ -227,7 +234,8 @@ export const runPipeline = async (
         state.context.set("preferred_label", outcome.preferred_label)
       }
 
-      await writeStageStatusArtifact(config.logsRoot, currentNode.id, outcome)
+      await writeStageStatusArtifact(executionLogsRoot, currentNode.id, outcome)
+      await captureStageArtifactsInContext(executionLogsRoot, currentNode.id, state.context)
 
       if (checkpointPath !== undefined) {
         await saveCheckpoint(
@@ -317,26 +325,8 @@ export const runPipeline = async (
       }
 
       if (readAttributeBoolean(nextEdge.attrs, "loop_restart", false)) {
-        const failureReason =
-          "loop_restart=true edges are not supported in this milestone implementation"
-
-        await emitEvent(emitter, {
-          type: "pipeline_failed",
-          pipeline_id: pipelineId,
-          duration_ms: Date.now() - startedAt,
-          error: failureReason,
-        })
-
-        return {
-          status: "fail",
-          pipeline_id: pipelineId,
-          completed_nodes: [...state.completedNodes],
-          node_outcomes: { ...state.nodeOutcomes },
-          context_values: state.context.snapshot(),
-          diagnostics,
-          checkpoint_path: checkpointPath,
-          failure_reason: failureReason,
-        }
+        restartExecutionState(state, restartContextSeed, nextEdge.to)
+        continue
       }
 
       state.currentNodeId = nextEdge.to
@@ -403,6 +393,7 @@ const initializeExecutionState = async (
       nodeRetries: {},
       currentNodeId: findStartNode(graph).id,
       nodeExecutionCount: 0,
+      restartCount: 0,
     }
   }
 
@@ -435,6 +426,7 @@ const initializeExecutionState = async (
     nodeRetries: { ...checkpoint.node_retries },
     currentNodeId,
     nodeExecutionCount: checkpoint.completed_nodes.length,
+    restartCount: 0,
   }
 }
 
@@ -476,6 +468,58 @@ const resolveCheckpointPath = (config: PipelineRunConfig): string | undefined =>
   }
 
   return undefined
+}
+
+const resolveExecutionLogsRoot = (
+  logsRoot: string | undefined,
+  restartCount: number,
+): string | undefined => {
+  if (logsRoot === undefined || logsRoot.length === 0) {
+    return undefined
+  }
+
+  if (restartCount <= 0) {
+    return logsRoot
+  }
+
+  return join(logsRoot, `restart-${restartCount}`)
+}
+
+const restartExecutionState = (
+  state: ExecutionState,
+  seed: { values: Record<string, unknown>; logs: string[] },
+  nextNodeId: string,
+): void => {
+  state.context = PipelineContext.fromSnapshot(seed.values, seed.logs)
+  state.completedNodes = []
+  state.nodeOutcomes = {}
+  state.nodeRetries = {}
+  state.currentNodeId = nextNodeId
+  state.restartCount += 1
+}
+
+const captureStageArtifactsInContext = async (
+  logsRoot: string | undefined,
+  nodeId: string,
+  context: PipelineContext,
+): Promise<void> => {
+  const artifacts = await listStageArtifactPaths(logsRoot, nodeId)
+  if (artifacts === undefined) {
+    return
+  }
+
+  const stagePrefix = `artifacts.${nodeId}`
+  context.set(`${stagePrefix}.dir`, artifacts.stageDir)
+  context.set(`${stagePrefix}.paths`, artifacts.paths)
+
+  const existing = context.get("artifacts.paths")
+  const existingByNode =
+    typeof existing === "object" && existing !== null && !Array.isArray(existing) ? existing : {}
+
+  context.set("artifacts.paths", {
+    ...existingByNode,
+    [nodeId]: artifacts.paths,
+  })
 }
 
 const resolveSuggestedNodeOverrideForParallel = (
@@ -527,6 +571,7 @@ const evaluateConfiguredSatisfaction = async (
     input: config.input,
     threshold: config.threshold,
     judge,
+    allow_heuristic_fallback: config.allow_heuristic_fallback,
     on_event: async (event) => {
       await emitEvent(emitter, event)
     },

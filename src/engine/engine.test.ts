@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 import { runPipeline } from "./engine/engine"
 import { CallbackEventEmitter } from "./events/emitter"
 import type { PipelineEvent } from "./events/events"
+import { readStageTextArtifact } from "./handlers/artifacts"
 import type { CodergenBackend } from "./handlers/codergen"
 import { QueueInterviewer } from "./interviewer"
 import { parseDot } from "./parser"
@@ -54,6 +55,79 @@ describe("runPipeline", () => {
 
       const prompt = await readFile(join(logsRoot, "task", "prompt.md"), "utf8")
       expect(prompt).toContain("ship feature")
+    })
+  })
+
+  it("exposes deterministic artifact context keys for completed stages", async () => {
+    await withTempLogsRoot(async (logsRoot) => {
+      const graph = parseDot(`
+        digraph ArtifactContext {
+          start [shape=Mdiamond]
+          task [shape=box, prompt="run task"]
+          exit [shape=Msquare]
+          start -> task -> exit
+        }
+      `)
+
+      const result = await runPipeline(graph, {
+        logsRoot,
+        codergenBackend: {
+          run: async () => "done",
+        },
+      })
+
+      expect(result.status).toBe("success")
+      expect(result.context_values["artifacts.start.paths"]).toEqual({
+        "status.json": join(logsRoot, "start", "status.json"),
+      })
+      expect(result.context_values["artifacts.task.paths"]).toEqual({
+        "prompt.md": join(logsRoot, "task", "prompt.md"),
+        "response.md": join(logsRoot, "task", "response.md"),
+        "status.json": join(logsRoot, "task", "status.json"),
+      })
+      expect(result.context_values["artifacts.paths"]).toEqual({
+        start: {
+          "status.json": join(logsRoot, "start", "status.json"),
+        },
+        task: {
+          "prompt.md": join(logsRoot, "task", "prompt.md"),
+          "response.md": join(logsRoot, "task", "response.md"),
+          "status.json": join(logsRoot, "task", "status.json"),
+        },
+      })
+    })
+  })
+
+  it("reads previously written prompt response and status artifacts", async () => {
+    await withTempLogsRoot(async (logsRoot) => {
+      const graph = parseDot(`
+        digraph ArtifactReads {
+          start [shape=Mdiamond]
+          task [shape=box, prompt="run task"]
+          exit [shape=Msquare]
+          start -> task -> exit
+        }
+      `)
+
+      const result = await runPipeline(graph, {
+        logsRoot,
+        codergenBackend: {
+          run: async () => "done",
+        },
+      })
+
+      expect(result.status).toBe("success")
+
+      const prompt = await readStageTextArtifact(logsRoot, "task", "prompt.md")
+      const response = await readStageTextArtifact(logsRoot, "task", "response.md")
+      const status = await readStageTextArtifact(logsRoot, "task", "status.json")
+
+      expect(prompt).toBe("run task")
+      expect(response).toBe("done")
+      expect(status).toBeDefined()
+      expect(JSON.parse(status ?? "{}")).toMatchObject({
+        status: "success",
+      })
     })
   })
 
@@ -406,6 +480,127 @@ describe("runPipeline", () => {
     })
   })
 
+  it("restarts execution for loop_restart edges instead of failing", async () => {
+    await withTempLogsRoot(async (logsRoot) => {
+      const graph = parseDot(`
+        digraph LoopRestartFlow {
+          start [shape=Mdiamond]
+          build [shape=box, prompt="build"]
+          verify [shape=box, prompt="verify"]
+          exit [shape=Msquare]
+
+          start -> build
+          build -> verify
+          verify -> build [condition="outcome=fail", loop_restart=true]
+          verify -> exit [condition="outcome=success"]
+        }
+      `)
+
+      let verifyAttempts = 0
+      const backend: CodergenBackend = {
+        run: async (node) => {
+          if (node.id !== "verify") {
+            return {
+              status: "success",
+            }
+          }
+
+          verifyAttempts += 1
+          if (verifyAttempts === 1) {
+            return {
+              status: "fail",
+              failure_reason: "verification failed once",
+            }
+          }
+
+          return {
+            status: "success",
+          }
+        },
+      }
+
+      const result = await runPipeline(graph, {
+        logsRoot,
+        codergenBackend: backend,
+      })
+
+      expect(result.status).toBe("success")
+      expect(verifyAttempts).toBe(2)
+      expect(result.failure_reason ?? "").not.toContain(
+        "loop_restart=true edges are not supported in this milestone implementation",
+      )
+    })
+  })
+
+  it("resets context-derived execution state on loop_restart", async () => {
+    await withTempLogsRoot(async (logsRoot) => {
+      const graph = parseDot(`
+        digraph LoopRestartContextReset {
+          start [shape=Mdiamond]
+          seed [shape=box, prompt="seed"]
+          gate [shape=box, prompt="gate"]
+          exit [shape=Msquare]
+
+          start -> seed
+          seed -> gate
+          gate -> seed [condition="outcome=fail", loop_restart=true]
+          gate -> exit [condition="outcome=success"]
+        }
+      `)
+
+      let seedAttempts = 0
+      let gateAttempts = 0
+      const backend: CodergenBackend = {
+        run: async (node) => {
+          if (node.id === "seed") {
+            seedAttempts += 1
+            if (seedAttempts === 1) {
+              return {
+                status: "success",
+                context_updates: {
+                  "first.pass.only": "stale",
+                },
+              }
+            }
+
+            return {
+              status: "success",
+            }
+          }
+
+          if (node.id === "gate") {
+            gateAttempts += 1
+            if (gateAttempts === 1) {
+              return {
+                status: "fail",
+                failure_reason: "trigger restart",
+              }
+            }
+
+            return {
+              status: "success",
+            }
+          }
+
+          return {
+            status: "success",
+          }
+        },
+      }
+
+      const result = await runPipeline(graph, {
+        logsRoot,
+        codergenBackend: backend,
+      })
+
+      expect(result.status).toBe("success")
+      expect(gateAttempts).toBe(2)
+      expect(result.completed_nodes).toEqual(["seed", "gate"])
+      expect(result.context_values["first.pass.only"]).toBeUndefined()
+      expect(result.context_values["artifacts.seed.dir"]).toBe(join(logsRoot, "restart-1", "seed"))
+    })
+  })
+
   it("executes parallel fan-out and fan-in selection", async () => {
     await withTempLogsRoot(async (logsRoot) => {
       const graph = parseDot(`
@@ -467,6 +662,162 @@ describe("runPipeline", () => {
       const parallelResults = result.context_values["parallel.results"]
       expect(Array.isArray(parallelResults)).toBe(true)
       expect((parallelResults as unknown[]).length).toBe(2)
+    })
+  })
+
+  it("supports loop_restart edges during parallel branch execution", async () => {
+    await withTempLogsRoot(async (logsRoot) => {
+      const graph = parseDot(`
+        digraph ParallelLoopRestartBranch {
+          start [shape=Mdiamond]
+          parallel [shape=component, join_policy="wait_all", max_parallel=2]
+          branch_a [shape=box, prompt="branch a"]
+          branch_a_restart [shape=box, prompt="branch a restart"]
+          branch_b [shape=box, prompt="branch b"]
+          fan_in [shape=tripleoctagon]
+          exit [shape=Msquare]
+
+          start -> parallel
+          parallel -> branch_a
+          parallel -> branch_b
+          branch_a -> branch_a_restart [loop_restart=true]
+          branch_a_restart -> fan_in
+          branch_b -> fan_in
+          fan_in -> exit [condition="outcome=success"]
+        }
+      `)
+
+      const result = await runPipeline(graph, {
+        logsRoot,
+        codergenBackend: {
+          run: async () => {
+            return {
+              status: "success",
+            }
+          },
+        },
+      })
+
+      expect(result.status).toBe("success")
+      expect(result.failure_reason ?? "").not.toContain(
+        "loop_restart=true edges are not supported in branch execution",
+      )
+
+      const parallelResults = result.context_values["parallel.results"] as Array<{
+        branch_id: string
+        completed_nodes: string[]
+      }>
+      const restartedBranch = parallelResults.find((branchResult) => branchResult.branch_id === "branch_a")
+      expect(restartedBranch?.completed_nodes).toEqual(["branch_a_restart"])
+    })
+  })
+
+  it("uses lexical tie-break for equally distant fan-in candidates", async () => {
+    await withTempLogsRoot(async (logsRoot) => {
+      const graph = parseDot(`
+        digraph ParallelTieBreak {
+          start [shape=Mdiamond]
+          parallel [shape=component, join_policy="wait_all", max_parallel=2]
+          branch_a [shape=box, prompt="branch a"]
+          branch_b [shape=box, prompt="branch b"]
+          fan_in_alpha [shape=tripleoctagon]
+          fan_in_beta [shape=tripleoctagon]
+          exit [shape=Msquare]
+
+          start -> parallel
+          parallel -> branch_a
+          parallel -> branch_b
+          branch_a -> fan_in_alpha
+          branch_a -> fan_in_beta
+          branch_b -> fan_in_alpha
+          branch_b -> fan_in_beta
+          fan_in_alpha -> exit [condition="outcome=success"]
+          fan_in_beta -> exit [condition="outcome=success"]
+        }
+      `)
+
+      const result = await runPipeline(graph, {
+        logsRoot,
+        codergenBackend: {
+          run: async () => "ok",
+        },
+        retryBackoff: FAST_BACKOFF,
+      })
+
+      expect(result.status).toBe("success")
+      expect(result.context_values["parallel.join_node"]).toBe("fan_in_alpha")
+      expect(result.completed_nodes).toEqual(["start", "parallel", "fan_in_alpha"])
+    })
+  })
+
+  it("keeps branch-local context updates isolated from parent context", async () => {
+    await withTempLogsRoot(async (logsRoot) => {
+      const graph = parseDot(`
+        digraph ParallelContextIsolation {
+          start [shape=Mdiamond]
+          parallel [shape=component, join_policy="wait_all", max_parallel=2]
+          branch_a [shape=box, prompt="branch a"]
+          branch_b [shape=box, prompt="branch b"]
+          fan_in [shape=tripleoctagon]
+          exit [shape=Msquare]
+
+          start -> parallel
+          parallel -> branch_a
+          parallel -> branch_b
+          branch_a -> fan_in
+          branch_b -> fan_in
+          fan_in -> exit [condition="outcome=success"]
+        }
+      `)
+
+      const result = await runPipeline(graph, {
+        logsRoot,
+        codergenBackend: {
+          run: async (node) => {
+            if (node.id === "branch_a") {
+              return {
+                status: "success",
+                context_updates: {
+                  score: 0.7,
+                  "branch.local": "only-a",
+                  "branch.a.value": "a",
+                },
+              }
+            }
+
+            if (node.id === "branch_b") {
+              return {
+                status: "partial_success",
+                context_updates: {
+                  score: 0.6,
+                  "branch.local": "only-b",
+                  "branch.b.value": "b",
+                },
+              }
+            }
+
+            return {
+              status: "success",
+            }
+          },
+        },
+        retryBackoff: FAST_BACKOFF,
+      })
+
+      expect(result.status).toBe("success")
+      expect(result.context_values["branch.local"]).toBeUndefined()
+      expect(result.context_values["branch.a.value"]).toBeUndefined()
+      expect(result.context_values["branch.b.value"]).toBeUndefined()
+
+      const parallelResults = result.context_values["parallel.results"]
+      expect(Array.isArray(parallelResults)).toBe(true)
+
+      const branchLocalValues = (
+        parallelResults as Array<{ outcome: { context_updates: Record<string, unknown> } }>
+      )
+        .map((branchResult) => branchResult.outcome.context_updates["branch.local"])
+        .sort()
+      expect(branchLocalValues).toEqual(["only-a", "only-b"])
     })
   })
 
