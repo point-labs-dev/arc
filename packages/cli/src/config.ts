@@ -38,6 +38,7 @@ export const DEFAULT_ARC_CONFIG: ArcProjectConfig = {
   humanGate: {
     enabled: false,
     mode: "optional",
+    timeout: 300,
   },
   digitalTwin: {
     enabled: false,
@@ -122,11 +123,14 @@ export const mergeArcConfig = (base: ArcProjectConfig, raw: unknown): ArcProject
     humanGate: {
       enabled: asBoolean(humanGateNode.enabled, base.humanGate.enabled),
       mode: humanMode,
+      command: asOptionalString(humanGateNode.command),
+      timeout: asPositiveNumber(humanGateNode.timeout, base.humanGate.timeout),
     },
     digitalTwin: {
       enabled: asBoolean(digitalTwinNode.enabled, base.digitalTwin.enabled),
       provider: asString(digitalTwinNode.provider, base.digitalTwin.provider),
       endpoint: asString(digitalTwinNode.endpoint, base.digitalTwin.endpoint),
+      command: asOptionalString(digitalTwinNode.command),
     },
   }
 }

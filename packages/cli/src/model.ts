@@ -40,12 +40,15 @@ export interface ArcBackendConfig {
 export interface ArcHumanGateConfig {
   readonly enabled: boolean
   readonly mode: ApprovalMode
+  readonly command?: string
+  readonly timeout: number
 }
 
 export interface ArcDigitalTwinConfig {
   readonly enabled: boolean
   readonly provider: string
   readonly endpoint: string
+  readonly command?: string
 }
 
 export interface ArcProjectConfig {
@@ -196,6 +199,25 @@ export interface AttemptBackendSession {
 
 export interface AttemptBackendFactory {
   createFreshSession(): Promise<AttemptBackendSession>
+}
+
+export interface HumanApprovalRequest {
+  readonly attempt: number
+  readonly summary: string
+  readonly filesChanged: readonly string[]
+}
+
+export type ApprovalStatus = "approved" | "rejected" | "skipped"
+
+export interface ApprovalDecision {
+  readonly status: ApprovalStatus
+  readonly reason: string
+}
+
+export interface DigitalTwinEnvironment {
+  readonly id: string
+  readonly endpoint: string
+  readonly metadata: Record<string, string>
 }
 
 export interface ConvergenceResult {

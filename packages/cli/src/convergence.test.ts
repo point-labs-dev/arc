@@ -147,4 +147,28 @@ describe("runConvergence", () => {
       expect(learning).toContain("Satisfaction score")
     })
   })
+
+  it("blocks commit when required human gate rejects", async () => {
+    await withTempProject("convergence:\n  maxAttempts: 1\napproval: required\n", async (projectRoot) => {
+      const commitSpy = vi.fn()
+      const result = await runConvergence({
+        projectRoot,
+        backendFactory: createBackendFactory(),
+        gitClient: createGitClient(commitSpy),
+        verificationRunner: async () => PASS_VERIFICATION,
+        humanGate: {
+          requestApproval: async () => ({
+            status: "rejected",
+            reason: "needs changes",
+          }),
+        },
+      })
+
+      expect(result.success).toBe(false)
+      expect(commitSpy).not.toHaveBeenCalled()
+
+      const learning = await readFile(join(projectRoot, "progress", "attempt-001.md"), "utf8")
+      expect(learning).toContain("Human gate rejected")
+    })
+  })
 })

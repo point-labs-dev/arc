@@ -3,11 +3,15 @@ import { join } from "node:path"
 
 import { createBackendFactory } from "./backend"
 import { loadArcConfig } from "./config"
+import { createDigitalTwinProvider, type DigitalTwinProvider } from "./digital-twin"
 import { createEvent, type ArcEventSink, CompositeArcEventSink, NdjsonArcEventSink } from "./events"
 import { collectProjectSnapshot, type GitClient, ShellGitClient } from "./git"
+import { createHumanGate, type HumanGate, resolveApprovalMode } from "./human-gate"
 import type {
+  ApprovalDecision,
   AttemptBackendFactory,
   ConvergenceResult,
+  DigitalTwinEnvironment,
   ProgressState,
   VerificationResult,
 } from "./model"
@@ -29,6 +33,8 @@ export interface RunConvergenceOptions {
   readonly gitClient?: GitClient
   readonly eventSink?: ArcEventSink
   readonly verificationRunner?: typeof runVerification
+  readonly humanGate?: HumanGate
+  readonly digitalTwinProvider?: DigitalTwinProvider
 }
 
 export const runConvergence = async (
@@ -66,6 +72,12 @@ export const runConvergence = async (
 
   const backendFactory = options.backendFactory ?? createBackendFactory(config)
   const verificationRunner = options.verificationRunner ?? runVerification
+  const humanGate = options.humanGate ?? createHumanGate(config)
+  const approvalMode = resolveApprovalMode(config)
+  const digitalTwinProvider =
+    config.digitalTwin.enabled === true
+      ? (options.digitalTwinProvider ?? createDigitalTwinProvider(config))
+      : undefined
 
   let currentProgress = progress
   const maxAttempts = config.convergence.maxAttempts
@@ -84,13 +96,19 @@ export const runConvergence = async (
       }),
     )
 
+    const session = await backendFactory.createFreshSession()
+    const digitalTwin = await provisionDigitalTwin({
+      provider: digitalTwinProvider,
+      attempt,
+      specText,
+    })
+
     const prompt = await buildPromptForAttempt({
       projectRoot: options.projectRoot,
       specText,
       attempt,
+      digitalTwin,
     })
-
-    const session = await backendFactory.createFreshSession()
 
     let backendSummary = ""
     let backendResponse = ""
@@ -123,6 +141,7 @@ export const runConvergence = async (
       )
     } finally {
       await session.close()
+      await teardownDigitalTwin(digitalTwinProvider, digitalTwin)
     }
 
     const verification =
@@ -144,6 +163,46 @@ export const runConvergence = async (
     const changedFiles = isGitRepo ? await gitClient.getChangedFiles(options.projectRoot) : []
 
     if (verification.passed) {
+      const approval = await humanGate.requestApproval({
+        attempt,
+        summary: renderVerificationSummary(verification),
+        filesChanged: changedFiles,
+      })
+
+      const approved = shouldProceedWithCommit(approvalMode, approval)
+      await baseSink.emit(
+        createEvent(attempt, {
+          type: "human_gate",
+          mode: approvalMode,
+          approved,
+          reason: approval.reason,
+        }),
+      )
+
+      if (!approved) {
+        const learningPath = await persistAttemptLearning(options.projectRoot, {
+          attemptNumber: attempt,
+          attempted: summarizeAttemptObjective(specText),
+          worked: deriveWhatWorked(verification),
+          failed: [`Human gate rejected commit: ${approval.reason}`],
+          filesChanged: changedFiles,
+          verificationSummary: renderVerificationSummary(verification),
+          backendSummary,
+          keyLearning: `Address reviewer feedback before commit: ${approval.reason}`,
+        })
+
+        await baseSink.emit(
+          createEvent(attempt, {
+            type: "learning_persisted",
+            path: learningPath,
+          }),
+        )
+
+        currentProgress = progressAfterFailure(currentProgress, attempt, verification)
+        await saveProgressState(options.projectRoot, currentProgress)
+        continue
+      }
+
       const commitMessage = `arc: converge attempt ${attempt}`
       const hash = isGitRepo
         ? await gitClient.commitAll(options.projectRoot, commitMessage)
@@ -203,14 +262,19 @@ const buildPromptForAttempt = async (input: {
   projectRoot: string
   specText: string
   attempt: number
+  digitalTwin?: DigitalTwinEnvironment
 }): Promise<string> => {
   const learnings = await readRecentLearnings(input.projectRoot, 3)
   const snapshot = await collectProjectSnapshot(input.projectRoot)
+  const twinText =
+    input.digitalTwin === undefined
+      ? ""
+      : `\n\nDigital twin endpoint:\n${input.digitalTwin.endpoint}\nTwin id: ${input.digitalTwin.id}`
 
   return buildAttemptPrompt({
     specText: input.specText,
     progressLearnings: learnings,
-    projectSnapshot: snapshot,
+    projectSnapshot: `${snapshot}${twinText}`,
     attemptNumber: input.attempt,
   })
 }
@@ -365,4 +429,49 @@ const summarizeImplementation = (rawResponse: string, summary: string): string =
     return trimmedResponse
   }
   return summary
+}
+
+const shouldProceedWithCommit = (
+  mode: ReturnType<typeof resolveApprovalMode>,
+  decision: ApprovalDecision,
+): boolean => {
+  if (mode === "none") {
+    return true
+  }
+
+  if (decision.status === "approved") {
+    return true
+  }
+
+  if (mode === "optional" && decision.status === "skipped") {
+    return true
+  }
+
+  return false
+}
+
+const provisionDigitalTwin = async (input: {
+  provider: DigitalTwinProvider | undefined
+  attempt: number
+  specText: string
+}): Promise<DigitalTwinEnvironment | undefined> => {
+  if (input.provider === undefined) {
+    return undefined
+  }
+
+  return input.provider.provision({
+    attempt: input.attempt,
+    objective: summarizeAttemptObjective(input.specText),
+  })
+}
+
+const teardownDigitalTwin = async (
+  provider: DigitalTwinProvider | undefined,
+  environment: DigitalTwinEnvironment | undefined,
+): Promise<void> => {
+  if (provider === undefined || environment === undefined) {
+    return
+  }
+
+  await provider.teardown(environment)
 }
