@@ -18,6 +18,7 @@ import {
   createDefaultHandlerRegistry,
 } from "../handlers/handler"
 import type { Interviewer } from "../interviewer"
+import { applyModelStylesheet } from "../stylesheet"
 import { type Diagnostic, type GraphDefinition, SHAPE_TO_HANDLER, ValidationError } from "../types"
 import { validate } from "../validation"
 import {
@@ -85,16 +86,18 @@ export const runPipeline = async (
   graph: GraphDefinition,
   config: PipelineRunConfig = {},
 ): Promise<PipelineRunResult> => {
-  const diagnostics = validateGraphIfEnabled(graph, config.validateGraph)
+  const executionGraph = cloneGraphForExecution(graph)
+  const diagnostics = validateGraphIfEnabled(executionGraph, config.validateGraph)
+  applyModelStylesheet(executionGraph)
 
-  const pipelineId = `${graph.id}-${Date.now()}`
+  const pipelineId = `${executionGraph.id}-${Date.now()}`
   const startedAt = Date.now()
 
   const emitter = config.eventEmitter ?? new NoopEventEmitter()
   await emitEvent(emitter, {
     type: "pipeline_started",
     pipeline_id: pipelineId,
-    pipeline_name: graph.id,
+    pipeline_name: executionGraph.id,
     started_at: new Date(startedAt).toISOString(),
   })
 
@@ -111,17 +114,17 @@ export const runPipeline = async (
       random: config.random,
     })
 
-  const state = await initializeExecutionState(graph, config, checkpointPath)
+  const state = await initializeExecutionState(executionGraph, config, checkpointPath)
 
   try {
     while (true) {
-      const currentNode = requireNodeById(graph, state.currentNodeId)
+      const currentNode = requireNodeById(executionGraph, state.currentNodeId)
       state.context.set("current_node", currentNode.id)
 
       if (isTerminalNode(currentNode)) {
-        const unsatisfiedGoalGate = findUnsatisfiedGoalGate(graph, state.nodeOutcomes)
+        const unsatisfiedGoalGate = findUnsatisfiedGoalGate(executionGraph, state.nodeOutcomes)
         if (unsatisfiedGoalGate !== undefined) {
-          const retryTarget = resolveRetryTarget(unsatisfiedGoalGate, graph)
+          const retryTarget = resolveRetryTarget(unsatisfiedGoalGate, executionGraph)
           if (retryTarget !== undefined) {
             state.currentNodeId = retryTarget
             continue
@@ -199,9 +202,9 @@ export const runPipeline = async (
       }
 
       const handler = registry.resolve(currentNode)
-      const retryPolicy = buildRetryPolicy(currentNode, graph, config.retryBackoff)
+      const retryPolicy = buildRetryPolicy(currentNode, executionGraph, config.retryBackoff)
       const outcome = await executeNodeWithRetry({
-        graph,
+        graph: executionGraph,
         node: currentNode,
         handler,
         retryPolicy,
@@ -266,14 +269,14 @@ export const runPipeline = async (
       const suggestedNextNodeId = resolveSuggestedNodeOverrideForParallel(
         currentNode,
         outcome,
-        graph,
+        executionGraph,
       )
       if (suggestedNextNodeId !== undefined) {
         state.currentNodeId = suggestedNextNodeId
         continue
       }
 
-      const nextEdge = selectNextEdge(currentNode, outcome, state.context, graph)
+      const nextEdge = selectNextEdge(currentNode, outcome, state.context, executionGraph)
       if (nextEdge === undefined) {
         if (outcome.status === "fail") {
           const failureReason = outcome.failure_reason || `Node "${currentNode.id}" failed`
@@ -369,6 +372,20 @@ export const runPipelineFromDot = async (
   const graph = parseDot(dotSource)
   return runPipeline(graph, config)
 }
+
+const cloneGraphForExecution = (graph: GraphDefinition): GraphDefinition => ({
+  id: graph.id,
+  attrs: { ...graph.attrs },
+  nodes: graph.nodes.map((node) => ({
+    ...node,
+    attrs: { ...node.attrs },
+    explicitAttrs: node.explicitAttrs === undefined ? undefined : [...node.explicitAttrs],
+  })),
+  edges: graph.edges.map((edge) => ({
+    ...edge,
+    attrs: { ...edge.attrs },
+  })),
+})
 
 const initializeExecutionState = async (
   graph: GraphDefinition,

@@ -57,6 +57,71 @@ describe("runPipeline", () => {
     })
   })
 
+  it("applies model stylesheet rules before backend execution", async () => {
+    await withTempLogsRoot(async (logsRoot) => {
+      const graph = parseDot(`
+        digraph StyledModels {
+          graph [model_stylesheet="
+            * { llm_model: base-model; llm_provider: anthropic; reasoning_effort: low; }
+            .critical { llm_model: class-model; llm_provider: gemini; }
+            .critical { llm_provider: openai; }
+            #review { llm_model: id-model; reasoning_effort: medium; }
+          "]
+          start [shape=Mdiamond]
+          implement [shape=box, class="critical", prompt="implement"]
+          review [shape=box, class="critical", prompt="review", llm_provider="custom", reasoning_effort="high"]
+          exit [shape=Msquare]
+          start -> implement -> review -> exit
+        }
+      `)
+
+      const originalImplement = graph.nodes.find((node) => node.id === "implement")
+      expect(originalImplement?.attrs.llm_model).toBe("")
+
+      const seen = new Map<
+        string,
+        {
+          llm_model: string
+          llm_provider: string
+          reasoning_effort: string
+        }
+      >()
+      const backend: CodergenBackend = {
+        run: async (node) => {
+          if (node.id === "implement" || node.id === "review") {
+            seen.set(node.id, {
+              llm_model: String(node.attrs.llm_model ?? ""),
+              llm_provider: String(node.attrs.llm_provider ?? ""),
+              reasoning_effort: String(node.attrs.reasoning_effort ?? ""),
+            })
+          }
+          return "ok"
+        },
+      }
+
+      const result = await runPipeline(graph, {
+        logsRoot,
+        codergenBackend: backend,
+      })
+
+      expect(result.status).toBe("success")
+      expect(seen.get("implement")).toEqual({
+        llm_model: "class-model",
+        llm_provider: "openai",
+        reasoning_effort: "low",
+      })
+      expect(seen.get("review")).toEqual({
+        llm_model: "id-model",
+        llm_provider: "custom",
+        reasoning_effort: "high",
+      })
+
+      expect(originalImplement?.attrs.llm_model).toBe("")
+      expect(originalImplement?.attrs.llm_provider).toBe("")
+      expect(originalImplement?.attrs.reasoning_effort).toBe("high")
+    })
+  })
+
   it("routes through conditional branches using edge selection", async () => {
     await withTempLogsRoot(async (logsRoot) => {
       const graph = parseDot(`
