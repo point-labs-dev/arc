@@ -8,7 +8,7 @@ import {
   createCommandSatisfactionJudge,
   evaluateSatisfaction,
   runHoldoutScenarios,
-} from "@point-labs/arc-engine"
+} from "../engine/index"
 
 import { createEvent, type ArcEventSink, NoopArcEventSink } from "./events"
 import type {

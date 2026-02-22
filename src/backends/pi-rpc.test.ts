@@ -2,10 +2,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { PipelineContext, type GraphNode } from "@point-labs/arc-engine"
+import { PipelineContext, type GraphNode } from "../engine/index"
 import { describe, expect, it } from "vitest"
 
-import { PiRpcBackend } from "./index"
+import { PiRpcBackend } from "./pi-rpc"
 
 const createNode = (): GraphNode => ({
   id: "task",
@@ -150,6 +150,51 @@ describe("PiRpcBackend", () => {
 
         expect(lines).toHaveLength(2)
         expect(lines[0]).not.toBe(lines[1])
+      },
+    )
+  })
+
+  it("returns fail outcome when onEvent throws", async () => {
+    await withTempScript(
+      `
+        process.stdin.setEncoding('utf8')
+        let buffer = ''
+        process.stdin.on('data', (chunk) => {
+          buffer += chunk
+          const lines = buffer.split(/\\r?\\n/)
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.trim()) continue
+            const command = JSON.parse(line)
+            if (command.type === 'prompt') {
+              process.stdout.write(JSON.stringify({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Hello' } }) + '\\n')
+              process.stdout.write(JSON.stringify({ type: 'message_end' }) + '\\n')
+              setTimeout(() => process.exit(0), 20)
+            }
+          }
+        })
+      `,
+      async (scriptPath) => {
+        const backend = new PiRpcBackend({
+          timeoutMs: 1_000,
+          launchCommand: () => ({
+            command: process.execPath,
+            args: [scriptPath],
+          }),
+          onEvent: () => {
+            throw new Error("event sink failed")
+          },
+        })
+
+        const result = await backend.run(createNode(), "Implement feature", new PipelineContext())
+        expect(typeof result).toBe("object")
+        if (typeof result === "string") {
+          throw new Error("expected fail outcome")
+        }
+
+        expect(result.status).toBe("fail")
+        expect(result.failure_reason).toContain("event handling failed")
+        expect(result.failure_reason).toContain("event sink failed")
       },
     )
   })

@@ -5,6 +5,7 @@
 export * from "./parser"
 export * from "./types"
 export * from "./validation"
+export * from "./stylesheet"
 export * from "./attributes"
 export * from "./graph"
 export * from "./interviewer"

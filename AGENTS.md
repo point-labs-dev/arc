@@ -19,11 +19,12 @@ Arc is a software factory built on the Attractor specification (https://github.c
 
 ```
 arc/
-├── packages/
+├── src/
 │   ├── engine/       # DOT pipeline runner (Attractor spec implementation)
-│   ├── pi-backend/   # Pi RPC as CodergenBackend
-│   ├── ui/           # Monitoring web dashboard (Vite + React)
+│   ├── backends/     # Pi RPC as CodergenBackend
 │   └── cli/          # CLI interface
+├── packages/
+│   └── ui/           # Monitoring web dashboard (Vite + React)
 ├── reference/        # Original Attractor NLSpecs (read-only reference)
 ├── SPEC.md           # What Arc should do
 ├── PROJECT.md        # Vision and architecture
@@ -33,12 +34,10 @@ arc/
 
 ## Build Order
 
-1. **packages/engine** — The Attractor pipeline engine. This is the foundation.
+1. **src/engine** — The Attractor pipeline engine. This is the foundation.
    - Read `reference/attractor-spec.md` thoroughly
-   - Read `packages/engine/AGENTS.md` for implementation instructions
-2. **packages/pi-backend** — Pi RPC integration as the CodergenBackend
-   - Read `packages/pi-backend/AGENTS.md`
-3. **packages/cli** — CLI wrapper (`arc run`, `arc status`)
+2. **src/backends** — Pi RPC integration as the CodergenBackend
+3. **src/cli** — CLI wrapper (`arc run`, `arc status`)
 4. **packages/ui** — Monitoring dashboard (see `specs/monitoring-ui.md`)
 
 ## Key Reference Files

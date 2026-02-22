@@ -201,6 +201,7 @@ class DotParser {
   private parseNodeStmt(scope: ParseScope): string {
     const nodeId = this.expectKind("identifier", "Expected node identifier").value
     const explicitAttrs = this.checkSymbol("[") ? this.parseAttrBlock(NODE_ATTR_TYPES) : {}
+    const explicitAttrKeys = Object.keys(explicitAttrs)
 
     const mergedAttrs: AttributeMap = {
       ...scope.nodeDefaults,
@@ -216,7 +217,7 @@ class DotParser {
       scope.inheritedClasses,
     )
 
-    this.upsertNode(nodeId, mergedAttrs)
+    this.upsertNode(nodeId, mergedAttrs, explicitAttrKeys)
     return nodeId
   }
 
@@ -354,13 +355,14 @@ class DotParser {
     throw this.errorAt(token, `Expected value, found "${token.value}"`)
   }
 
-  private upsertNode(nodeId: string, attrs: AttributeMap): void {
+  private upsertNode(nodeId: string, attrs: AttributeMap, explicitAttrKeys: string[]): void {
     const existing = this.nodesById.get(nodeId)
     if (existing !== undefined) {
       existing.attrs = {
         ...existing.attrs,
         ...attrs,
       }
+      existing.explicitAttrs = mergeExplicitAttrs(existing.explicitAttrs, explicitAttrKeys)
       return
     }
 
@@ -368,6 +370,7 @@ class DotParser {
     this.nodesById.set(nodeId, {
       id: nodeId,
       attrs,
+      explicitAttrs: mergeExplicitAttrs(undefined, explicitAttrKeys),
     })
   }
 
@@ -773,6 +776,24 @@ const mergeClasses = (currentValue: string, classesToAdd: string[]): string => {
     }
   }
   return Array.from(merged).join(",")
+}
+
+const mergeExplicitAttrs = (
+  current: readonly string[] | undefined,
+  incoming: readonly string[],
+): string[] => {
+  if (incoming.length === 0 && current !== undefined) {
+    return [...current]
+  }
+
+  const merged = new Set<string>()
+  for (const key of current ?? []) {
+    merged.add(key)
+  }
+  for (const key of incoming) {
+    merged.add(key)
+  }
+  return Array.from(merged)
 }
 
 const deriveSubgraphClass = (label: string): string => {

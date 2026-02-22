@@ -107,4 +107,29 @@ describe("selectNextEdge", () => {
 
     expect(selected?.to).toBe("alpha")
   })
+
+  it("returns undefined when all edges fail conditions", () => {
+    const graph = parseDot(`
+      digraph NoEligibleEdges {
+        start [shape=Mdiamond]
+        route [shape=diamond]
+        alpha [shape=box, prompt="alpha"]
+        beta [shape=box, prompt="beta"]
+        exit [shape=Msquare]
+
+        start -> route
+        route -> alpha [condition="outcome=fail", weight=99]
+        route -> beta [condition="context.force=true", weight=1]
+      }
+    `)
+
+    const selected = selectNextEdge(
+      requireNodeById(graph, "route"),
+      successOutcome(),
+      new PipelineContext(),
+      graph,
+    )
+
+    expect(selected).toBeUndefined()
+  })
 })

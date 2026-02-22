@@ -1,17 +1,28 @@
 {
   "name": "arc",
+  "version": "0.1.0",
   "private": true,
-  "workspaces": [
-    "packages/engine",
-    "packages/pi-backend",
-    "packages/ui",
-    "packages/cli"
-  ],
+  "type": "module",
+  "workspaces": ["packages/ui"],
+  "bin": { "arc": "dist/cli/main.js" },
   "scripts": {
-    "build": "npm run build --workspaces",
-    "test": "npm run test --workspaces",
-    "typecheck": "npm run typecheck --workspaces",
-    "lint": "npm run lint --workspaces --if-present",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src/",
+    "format": "biome format src/",
     "check": "npm run typecheck && npm run test && npm run lint"
+  },
+  "dependencies": {
+    "effect": "^3.14.0",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@types/node": "^22.0.0",
+    "oxlint": "^0.16.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
   }
 }

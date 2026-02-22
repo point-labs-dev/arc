@@ -1,5 +1,5 @@
-import { PipelineContext, type GraphNode } from "@point-labs/arc-engine"
-import { PiRpcBackend } from "@point-labs/arc-pi-backend"
+import { PipelineContext, type GraphNode } from "../engine/index"
+import { PiRpcBackend } from "../backends/pi-rpc"
 
 import type {
   ArcProjectConfig,

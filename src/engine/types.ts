@@ -15,6 +15,7 @@ export type AttributeMap = Record<string, AttributeValue>
 export interface GraphNode {
   readonly id: string
   attrs: AttributeMap
+  explicitAttrs?: string[]
 }
 
 export interface GraphEdge {

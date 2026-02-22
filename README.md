@@ -19,10 +19,11 @@ Arc is a DOT-based pipeline engine that orchestrates AI coding agents. Built on 
 
 ```
 arc/
-├── packages/
+├── src/
 │   ├── engine/        # DOT pipeline runner (Attractor-compatible)
-│   ├── pi-backend/    # Pi RPC as CodergenBackend
-│   ├── cli/           # CLI (arc run, arc validate, arc status)
+│   ├── backends/      # Pi RPC as CodergenBackend
+│   └── cli/           # CLI (arc run, arc validate, arc status)
+├── packages/
 │   └── ui/            # Monitoring web dashboard
 ├── reference/         # Original Attractor NLSpecs
 ├── SPEC.md            # What Arc does

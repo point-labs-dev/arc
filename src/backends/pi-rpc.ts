@@ -7,7 +7,7 @@ import {
   type GraphNode,
   type Outcome,
   type PipelineContext,
-} from "@point-labs/arc-engine"
+} from "../engine/index"
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000
 const DEFAULT_MODEL = "claude-sonnet-4-20250514"
@@ -125,6 +125,10 @@ export class PiRpcBackend implements CodergenBackend {
       }
 
       const handleLine = async (line: string): Promise<void> => {
+        if (settled) {
+          return
+        }
+
         const payload = parseJsonLine(line)
         if (payload === undefined) {
           return
@@ -151,7 +155,13 @@ export class PiRpcBackend implements CodergenBackend {
         stdoutBuffer = lines.pop() ?? ""
 
         for (const line of lines) {
-          void handleLine(line)
+          handleLine(line).catch((error) => {
+            const message = error instanceof Error ? error.message : String(error)
+            settle({
+              type: "error",
+              message: `Pi RPC event handling failed: ${message}`,
+            })
+          })
         }
       })
 

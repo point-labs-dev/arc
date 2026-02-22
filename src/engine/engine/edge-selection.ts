@@ -56,7 +56,7 @@ export const selectNextEdge = (
     return bestByWeightThenLexical(unconditional)
   }
 
-  return bestByWeightThenLexical(edges)
+  return bestByWeightThenLexical(eligible)
 }
 
 export const bestByWeightThenLexical = (edges: GraphEdge[]): GraphEdge | undefined => {
