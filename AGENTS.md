@@ -2,49 +2,74 @@
 
 ## What This Is
 
-Arc is a software factory built on the Attractor specification (https://github.com/strongdm/attractor). It orchestrates AI coding agents through DOT-based pipelines to autonomously implement software from specifications.
+Arc is a software factory built on the [Attractor specification](https://github.com/strongdm/attractor). It orchestrates AI coding agents through DOT-based pipelines. The convergence loop is a graph, not code.
 
 ## Core Principle
 
 **SPEC → Verify. Not task lists.**
 
-- Humans write specifications (what the system should do) and verification (how to prove it works)
-- The agent reads the spec and decides what to implement and in what order
-- Each coding attempt uses a FRESH context window — no accumulated confusion
-- Learnings from failed attempts persist on disk (`progress/` directory)
-- Agent keeps trying until verification passes (convergence, not completion)
-- Holdout scenarios stored outside codebase — agent can't see them, can't cheat
+- The convergence flow is defined in `pipelines/convergence.dot`
+- The engine walks the graph: parse DOT → execute nodes → select edges → repeat
+- Each coding attempt uses a FRESH context window
+- Learnings persist on disk (`progress/` directory)
+- Holdout scenarios stored outside codebase — agent can't cheat
 
-## Architecture
+## Structure
 
 ```
 arc/
 ├── src/
-│   ├── engine/       # DOT pipeline runner (Attractor spec implementation)
-│   ├── backends/     # Pi RPC as CodergenBackend
-│   └── cli/          # CLI interface
+│   ├── engine/          # DOT pipeline runner (Attractor spec)
+│   │   ├── parser.ts    # DOT parser (BNF grammar)
+│   │   ├── engine/      # Execution loop, edge selection, retry, checkpoint
+│   │   ├── handlers/    # Node handlers (codergen, tool, parallel, etc.)
+│   │   ├── context/     # Pipeline context, outcomes, conditions
+│   │   ├── events/      # Typed event system
+│   │   └── validation.ts
+│   ├── backends/
+│   │   └── pi-rpc.ts    # Pi RPC as CodergenBackend
+│   └── cli/
+│       ├── main.ts      # Entry point
+│       └── index.ts     # Loads DOT, wires backends, calls runPipeline()
 ├── packages/
-│   └── ui/           # Monitoring web dashboard (Vite + React)
-├── reference/        # Original Attractor NLSpecs (read-only reference)
-├── SPEC.md           # What Arc should do
-├── PROJECT.md        # Vision and architecture
-├── scenarios/        # Holdout tests for Arc itself
-└── progress/         # Learnings from build attempts
+│   └── ui/              # Monitoring web dashboard (Vite + React)
+├── pipelines/
+│   └── convergence.dot  # Default convergence pipeline
+├── reference/           # Original Attractor NLSpecs (read-only)
+├── specs/
+│   └── monitoring-ui.md # Web UI specification
+└── progress/            # Build attempt learnings
 ```
 
-## Build Order
+## How It Works
 
-1. **src/engine** — The Attractor pipeline engine. This is the foundation.
-   - Read `reference/attractor-spec.md` thoroughly
-2. **src/backends** — Pi RPC integration as the CodergenBackend
-3. **src/cli** — CLI wrapper (`arc run`, `arc status`)
-4. **packages/ui** — Monitoring dashboard (see `specs/monitoring-ui.md`)
+```bash
+arc run [pipeline.dot] --project /path/to/project
+```
 
-## Key Reference Files
+1. CLI reads the DOT file (default: `pipelines/convergence.dot`)
+2. Populates context variables: `$spec`, `$learnings`, `$project_state`
+3. Calls `runPipeline(graph, config)` from the engine
+4. Engine walks the graph, dispatching to handlers:
+   - `codergen` nodes → PiRpcBackend (spawns `pi --mode rpc`)
+   - `tool` nodes → shell commands
+   - `conditional` nodes → edge selection based on conditions
+   - `wait.human` nodes → Interviewer interface
+5. Checkpoint saved after each node (resume on crash)
+6. Events emitted for monitoring UI
 
-- `reference/attractor-spec.md` — The pipeline engine specification (2083 lines)
-- `reference/coding-agent-loop-spec.md` — The coding agent loop spec (Pi implements this)
-- `reference/unified-llm-spec.md` — The unified LLM client spec (Pi implements this)
-- `specs/monitoring-ui.md` — The monitoring web UI specification
-- `SPEC.md` — What Arc should do (functional spec)
-- `PROJECT.md` — Vision, architecture, design decisions
+## Key Files
+
+- `pipelines/convergence.dot` — THE convergence loop (this is the program)
+- `src/engine/engine/engine.ts` — `runPipeline()` core loop
+- `src/engine/parser.ts` — DOT parser
+- `src/backends/pi-rpc.ts` — Pi RPC backend
+- `reference/attractor-spec.md` — The source spec (2083 lines)
+
+## Code Style
+
+- TypeScript strict mode, ES modules
+- Effect.ts for typed errors and concurrency where used
+- Vitest for testing
+- oxlint for linting, Biome for formatting
+- `npm run check` validates everything
