@@ -22,7 +22,7 @@ export class CodergenHandler implements Handler {
     graph: GraphDefinition,
     logsRoot?: string,
   ): Promise<Outcome> {
-    const prompt = this.buildPrompt(node, graph)
+    const prompt = this.buildPrompt(node, graph, context)
     await writeStageTextArtifact(logsRoot, node.id, "prompt.md", prompt)
 
     let responseText = ""
@@ -49,25 +49,45 @@ export class CodergenHandler implements Handler {
 
     await writeStageTextArtifact(logsRoot, node.id, "response.md", responseText)
 
-    const result = successOutcome({
-      notes: `Stage completed: ${node.id}`,
-      context_updates: {
-        last_stage: node.id,
-        last_response: truncate(responseText, 200),
-      },
-    })
+    const structured = parseStructuredOutcome(responseText)
+    const result =
+      structured ??
+      successOutcome({
+        notes: `Stage completed: ${node.id}`,
+        context_updates: {
+          last_stage: node.id,
+          last_response: truncate(responseText, 200),
+        },
+      })
 
     await writeStageStatusArtifact(logsRoot, node.id, result)
     return result
   }
 
-  private buildPrompt(node: GraphNode, graph: GraphDefinition): string {
+  private buildPrompt(node: GraphNode, graph: GraphDefinition, context: PipelineContext): string {
     const explicitPrompt = readAttributeString(node.attrs, "prompt").trim()
     const basePrompt =
       explicitPrompt.length > 0 ? explicitPrompt : readAttributeString(node.attrs, "label", node.id)
 
     const goal = readAttributeString(graph.attrs, "goal")
-    return basePrompt.replaceAll("$goal", goal)
+    const withGoal = basePrompt.replaceAll("$goal", goal)
+    return withGoal.replace(/\$([A-Za-z_][A-Za-z0-9_.]*)/g, (match, key: string) => {
+      if (key === "goal") {
+        return goal
+      }
+
+      const direct = context.get(key)
+      if (direct !== undefined && direct !== null) {
+        return String(direct)
+      }
+
+      const prefixed = context.get(`context.${key}`)
+      if (prefixed !== undefined && prefixed !== null) {
+        return String(prefixed)
+      }
+
+      return match
+    })
   }
 }
 
@@ -76,3 +96,39 @@ const truncate = (value: string, maxLength: number): string =>
 
 const isOutcomeLike = (value: unknown): value is Outcome =>
   typeof value === "object" && value !== null && "status" in value
+
+const parseStructuredOutcome = (responseText: string): Outcome | undefined => {
+  const trimmed = responseText.trim()
+  if (trimmed.length === 0) {
+    return undefined
+  }
+
+  const direct = parseJsonObject(trimmed)
+  if (direct !== undefined && isOutcomeLike(direct)) {
+    return normalizeOutcome(direct)
+  }
+
+  const fenced = trimmed.match(/```json\s*([\s\S]*?)```/i)
+  if (fenced === null) {
+    return undefined
+  }
+
+  const parsed = parseJsonObject(fenced[1])
+  if (parsed !== undefined && isOutcomeLike(parsed)) {
+    return normalizeOutcome(parsed)
+  }
+
+  return undefined
+}
+
+const parseJsonObject = (value: string): Record<string, unknown> | undefined => {
+  try {
+    const parsed = JSON.parse(value)
+    if (typeof parsed !== "object" || parsed === null) {
+      return undefined
+    }
+    return parsed as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+}

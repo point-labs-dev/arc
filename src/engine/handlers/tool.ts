@@ -30,9 +30,11 @@ export class ToolHandler implements Handler {
     _graph: GraphDefinition,
     _logsRoot?: string,
   ): Promise<Outcome> {
-    const command = readAttributeString(node.attrs, "tool_command").trim()
+    const command =
+      readAttributeString(node.attrs, "prompt").trim() ||
+      readAttributeString(node.attrs, "tool_command").trim()
     if (command.length === 0) {
-      return failOutcome("No tool_command specified")
+      return failOutcome("No prompt or tool_command specified")
     }
 
     const timeoutMs = readAttributeDurationMilliseconds(node.attrs, "timeout")
@@ -40,13 +42,24 @@ export class ToolHandler implements Handler {
     try {
       const result = await this.runner(command, timeoutMs)
       if (result.exitCode !== 0) {
-        return failOutcome(result.stderr.trim() || `Tool exited with code ${result.exitCode}`)
+        return failOutcome(result.stderr.trim() || `Tool exited with code ${result.exitCode}`, {
+          context_updates: {
+            [`tool.exit_code.${node.id}`]: result.exitCode,
+            [`tool.success.${node.id}`]: false,
+            [`tool.output.${node.id}`]: result.stdout,
+            [`tool.error.${node.id}`]: result.stderr,
+          },
+        })
       }
 
       return successOutcome({
         notes: `Tool completed: ${command}`,
         context_updates: {
           "tool.output": result.stdout,
+          [`tool.output.${node.id}`]: result.stdout,
+          [`tool.error.${node.id}`]: result.stderr,
+          [`tool.exit_code.${node.id}`]: result.exitCode,
+          [`tool.success.${node.id}`]: true,
         },
       })
     } catch (error) {

@@ -1,0 +1,56 @@
+digraph ArcConvergence {
+    Start [shape=Mdiamond, label="Start"]
+
+    ReadSpec [
+        prompt="Read SPEC.md and progress/ directory. Analyze what has been implemented and what remains. Decide what to implement next. Output your plan.",
+        llm_model="claude-opus-4-0-20250514"
+    ]
+
+    Implement [
+        prompt="Implement the next spec item.\n\nSpec:\n$spec\n\nLearnings from past attempts:\n$learnings\n\nProject state:\n$project_state",
+        llm_model="claude-sonnet-4-20250514",
+        max_retries=3,
+        timeout="30m"
+    ]
+
+    Test [
+        shape=parallelogram,
+        prompt="npm run typecheck && npm run test && npm run lint"
+    ]
+
+    Holdout [
+        shape=parallelogram,
+        prompt="run-holdout-scenarios --dir scenarios/"
+    ]
+
+    Satisfaction [
+        prompt="Evaluate whether the implementation satisfies the spec. Consider test and holdout results from context. Return ONLY JSON: {\"status\":\"success\",\"context_updates\":{\"satisfaction\":0.0,\"satisfaction_passed\":false}}",
+        llm_model="claude-opus-4-0-20250514"
+    ]
+
+    Check [shape=diamond, label="Satisfied?"]
+
+    PersistLearnings [
+        shape=parallelogram,
+        prompt="write-attempt-learnings --dir progress/"
+    ]
+
+    Commit [
+        shape=parallelogram,
+        prompt="git add -A && git commit -m 'arc: implement spec item'"
+    ]
+
+    MoreSpec [
+        prompt="Decide if all SPEC.md items are complete. Return ONLY JSON: {\"status\":\"success\",\"context_updates\":{\"spec_complete\":false}}"
+    ]
+
+    Exit [shape=Msquare, label="Exit"]
+
+    Start -> ReadSpec -> Implement -> Test -> Holdout -> Satisfaction -> Check
+    Check -> Commit [condition="context.satisfaction_passed=true", label="pass", weight=3]
+    Check -> PersistLearnings [condition="context.satisfaction_passed!=true", label="fail", weight=2]
+    PersistLearnings -> Implement
+    Commit -> MoreSpec
+    MoreSpec -> ReadSpec [condition="context.spec_complete!=true", label="more"]
+    MoreSpec -> Exit [condition="context.spec_complete=true", label="done", weight=2]
+}
