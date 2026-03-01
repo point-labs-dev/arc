@@ -1,66 +1,95 @@
-# Arc Monitoring UI — Spec (Attractor-aligned)
-
-*Based on Attractor spec §9.5 (HTTP Server Mode) and §9.6 (Observability and Events)*
+# Arc Monitoring UI — Spec (Attractor §9.5/§9.6)
 
 ## Overview
 
-A web-based monitoring dashboard for Arc pipelines. The backend is an HTTP server that wraps the pipeline engine. The frontend consumes SSE event streams and manages pipelines via REST.
+Web-based monitoring for Arc pipelines. HTTP server wraps the engine (REST + SSE). React dashboard consumes the API. DOT graph rendered client-side via WASM.
 
 ## Architecture
 
 ```
-Browser (React)  ◄── REST + SSE ──►  Arc HTTP Server
-                                      Wraps: parseDot(), runPipeline(), validate()
-                                      Backends: PiRpcBackend, Interviewer
+Browser (React + @hpcc-js/wasm-graphviz)
+  ├── EventSource → /pipelines/:id/events (SSE)
+  ├── fetch → REST endpoints
+  └── WASM DOT→SVG rendering (client-side, no Graphviz install)
+      │
+      ▼
+Arc HTTP Server (Hono)
+  ├── REST: pipeline management
+  ├── SSE: Attractor event streaming
+  └── Wraps: parseDot(), runPipeline(), validate()
 ```
 
-## Backend: HTTP Server (§9.5)
+## Stack
 
-### Endpoints
+### Server
+- **Hono** — lightweight HTTP framework, built-in `streamSSE` helper
+- **Node.js** — runs alongside or embedded in CLI (`arc serve`)
+
+### Client
+- **Vite + React 19 + TypeScript**
+- **Tailwind CSS v4 + shadcn/ui**
+- **@hpcc-js/wasm-graphviz** — client-side DOT→SVG rendering (no server Graphviz dependency)
+- **Zustand** — state management (SSE events accumulate into store)
+- **EventSource** — native browser SSE with auto-reconnect
+- **recharts** — analytics charts
+
+## Server: REST + SSE Endpoints
+
+### Pipeline Management
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | /pipelines | Submit DOT source + config. Starts execution. Returns { id }. |
+| POST | /pipelines | Submit DOT source + config. Starts execution. Returns `{ id }`. |
 | GET | /pipelines | List all pipelines (active + completed). |
-| GET | /pipelines/:id | Pipeline status, progress, current node, completed nodes, outcomes. |
-| GET | /pipelines/:id/events | SSE stream of typed pipeline events (real-time). |
+| GET | /pipelines/:id | Pipeline status, progress, current node, outcomes. |
 | POST | /pipelines/:id/cancel | Cancel a running pipeline. |
-| GET | /pipelines/:id/graph | Rendered pipeline graph as SVG. Current node highlighted. |
-| GET | /pipelines/:id/questions | Pending human gate questions. |
-| POST | /pipelines/:id/questions/:qid/answer | Submit answer to a human gate question. |
+| DELETE | /pipelines/:id | Remove a completed pipeline from history. |
+
+### Live Monitoring
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /pipelines/:id/events | **SSE stream** of Attractor-typed events. |
+| GET | /pipelines/:id/graph | DOT source + execution state (JSON). Client renders SVG. |
 | GET | /pipelines/:id/checkpoint | Current checkpoint state (JSON). |
 | GET | /pipelines/:id/context | Current context key-value store (JSON). |
 
-### Request/Response Formats
+### Human Gates
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /pipelines/:id/questions | Pending human gate questions. |
+| POST | /pipelines/:id/questions/:qid/answer | Submit answer to a human gate question. |
+
+### Request/Response
 
 **POST /pipelines**
 ```json
 {
-  "dot": "digraph { ... }",
   "dotPath": "pipelines/convergence.dot",
   "projectRoot": "/path/to/project",
-  "config": {
-    "model": { "default": "claude-sonnet-4-20250514" }
-  }
+  "config": {}
 }
 ```
-Response: `{ "id": "convergence-1709234567890", "status": "running", "startedAt": "..." }`
+→ `{ "id": "conv-1709234567890", "status": "running" }`
 
 **GET /pipelines/:id**
 ```json
 {
-  "id": "convergence-1709234567890",
+  "id": "conv-1709234567890",
   "status": "running",
   "startedAt": "2026-02-28T20:00:00Z",
   "currentNode": "Implement",
   "completedNodes": ["Start", "ReadSpec"],
-  "nodeOutcomes": { "ReadSpec": { "status": "success", "output": "..." } },
+  "nodeOutcomes": { "ReadSpec": { "status": "success" } },
   "nodeRetries": { "Implement": 1 },
-  "elapsed": 142
+  "elapsedSec": 142
 }
 ```
 
 **GET /pipelines/:id/events (SSE)**
+
+Uses Hono's `streamSSE`:
 ```
 event: StageStarted
 data: {"name":"Implement","index":3,"timestamp":"2026-02-28T20:02:15Z"}
@@ -75,7 +104,7 @@ event: StageRetrying
 data: {"name":"Implement","index":3,"attempt":2,"delay":400}
 
 event: InterviewStarted
-data: {"question_id":"q1","question":"Approve changes?","stage":"Review","choices":["approve","reject"]}
+data: {"question_id":"q1","question":"Approve?","stage":"Review","choices":["approve","reject"]}
 
 event: CheckpointSaved
 data: {"node_id":"Implement"}
@@ -85,98 +114,216 @@ data: {"duration":342.5,"artifact_count":4}
 ```
 
 **GET /pipelines/:id/graph**
-Returns `image/svg+xml` — DOT graph rendered as SVG with:
-- Current node highlighted (blue border)
-- Completed nodes shaded green
-- Failed nodes shaded red
-- Edges colored by traversal status
-
-**GET /pipelines/:id/questions**
 ```json
-{ "questions": [{ "id": "q1", "stage": "Review", "type": "choice", "text": "Approve?", "choices": ["approve", "reject"] }] }
+{
+  "dot": "digraph ArcConvergence { ... }",
+  "executionState": {
+    "currentNode": "Implement",
+    "completedNodes": ["Start", "ReadSpec"],
+    "failedNodes": [],
+    "retryingNodes": ["Implement"],
+    "nodeOutcomes": { "ReadSpec": { "status": "success" } }
+  }
+}
+```
+Client uses `@hpcc-js/wasm-graphviz` to render DOT→SVG, then applies CSS classes based on `executionState` to color nodes.
+
+### Server Implementation Notes
+
+```typescript
+import { Hono } from "hono"
+import { streamSSE } from "hono/streaming"
+import { cors } from "hono/cors"
+import { runPipeline } from "../engine/index"
+import { PiRpcBackend } from "../backends/pi-rpc"
+
+const app = new Hono()
+app.use("/*", cors())
+
+// SSE endpoint
+app.get("/pipelines/:id/events", (c) => {
+  const pipeline = pipelines.get(c.req.param("id"))
+  return streamSSE(c, async (stream) => {
+    const handler = (event: PipelineEvent) => {
+      stream.writeSSE({
+        event: event.type,
+        data: JSON.stringify(event),
+        id: String(Date.now()),
+      })
+    }
+    pipeline.emitter.on("event", handler)
+    // Keep alive until pipeline completes or client disconnects
+    await new Promise((resolve) => {
+      pipeline.emitter.on("PipelineCompleted", resolve)
+      pipeline.emitter.on("PipelineFailed", resolve)
+    })
+  })
+})
 ```
 
-**POST /pipelines/:id/questions/:qid/answer**
-Request: `{ "answer": "approve" }` Response: `{ "ok": true }`
+- Pipelines stored in-memory `Map<string, PipelineRun>`
+- Each run has its own event emitter
+- SSE connections cleaned up on pipeline completion
+- Human gate: `Interviewer` implementation holds questions in a `Map`, resolves Promise when REST answer arrives
 
-### Implementation Notes
+## Client: React Dashboard
 
-- Lightweight HTTP (node:http or Hono)
-- SSE via standard text/event-stream
-- Graph rendering: shell to `dot -Tsvg` (Graphviz) with state-based node styling
-- Pipelines managed in-memory with checkpoint persistence to disk
-- Multiple concurrent pipelines supported
-
-## Frontend: Web Dashboard
-
-### Tech Stack
-
-- Vite + React 19 + TypeScript
-- Tailwind CSS v4 + shadcn/ui
-- Zustand (state from SSE stream)
-- Inline SVG from /graph endpoint (auto-refreshes on events)
-- recharts (analytics)
-
-### Screens
-
-#### 1. Pipeline Dashboard (/)
+### Layout (Dagster-inspired)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Arc Monitor                                              │
+│ Arc Monitor                              [+ New Pipeline]│
 ├──────────────┬──────────────────────────────────────────┤
-│  Pipelines   │  Pipeline Graph (SVG from /graph)        │
+│              │                                          │
+│  Pipelines   │  Pipeline Graph (DOT→SVG via WASM)      │
 │  ┌────────┐  │  ┌────────────────────────────────────┐  │
-│  │ conv-1 │◄─│  │   [Start] → [ReadSpec] → [Impl]   │  │
-│  │ ●run   │  │  │   → [Test] → [Holdout] → [Check]  │  │
-│  ├────────┤  │  │   fail→[Persist]→[Impl]            │  │
-│  │ conv-2 │  │  │   pass→[Commit]→[More?]→[Exit]    │  │
-│  │ ✓done  │  │  └────────────────────────────────────┘  │
-│  └────────┘  │                                          │
-│              │  Event Stream (SSE)                       │
-│  Current:    │  ┌────────────────────────────────────┐  │
-│  Implement   │  │ ● StageStarted: Implement          │  │
-│  Attempt: 2  │  │ ✓ StageCompleted: Test              │  │
-│  Elapsed:    │  │ ✗ StageFailed: Holdout              │  │
-│  2m 14s      │  │ ↻ StageRetrying: Implement #2       │  │
+│  │ conv-1 │◄─│  │   ● Start → ✓ ReadSpec             │  │
+│  │ ●run   │  │  │     → ↻ Implement ← ─ ─ ─ ┐      │  │
+│  ├────────┤  │  │     → ○ Test               │      │  │
+│  │ conv-2 │  │  │     → ○ Holdout             │      │  │
+│  │ ✓done  │  │  │     → ○ Check ── fail ─ ─ ─┘      │  │
+│  ├────────┤  │  │     → ○ Commit → ○ Exit            │  │
+│  │ conv-3 │  │  └────────────────────────────────────┘  │
+│  │ ✗fail  │  │                                          │
+│  └────────┘  │  Click node → expand detail panel        │
+│              │                                          │
+│  Status:     ├──────────────────────────────────────────┤
+│  Implement   │                                          │
+│  Attempt: 2  │  Event Stream (SSE via EventSource)      │
+│  Elapsed:    │  ┌────────────────────────────────────┐  │
+│  2m 14s      │  │ 20:02:15 ● StageStarted: Implement │  │
+│              │  │ 20:03:42 ✓ StageCompleted: Test     │  │
+│              │  │ 20:03:50 ✗ StageFailed: Holdout     │  │
+│              │  │ 20:03:51 ↻ StageRetrying: #2        │  │
 │              │  └────────────────────────────────────┘  │
 ├──────────────┴──────────────────────────────────────────┤
 │ ⏸ Human Gate: "Approve changes?" [Approve] [Reject]     │
 └─────────────────────────────────────────────────────────┘
 ```
 
-- Sidebar: pipeline list from GET /pipelines
-- Main: SVG graph (auto-refreshes) + SSE event stream
-- Bottom: human gate controls (GET /questions, POST /answer)
+### Screens
 
-#### 2. Pipeline Detail (/pipelines/:id)
+#### 1. Dashboard (`/`)
 
-- Graph SVG with execution state
-- Live context values (GET /context)
-- Checkpoint state (GET /checkpoint)
-- Node outcomes with durations
-- Full event log
+**Pipeline sidebar (left):**
+- `GET /pipelines` → list with status badges (● running, ✓ done, ✗ fail)
+- Click to select → updates graph + events
+- Shows: current node, attempt count, elapsed time
 
-#### 3. History (/history)
+**Pipeline graph (top-right):**
+- `GET /pipelines/:id/graph` returns DOT + execution state
+- Client renders with `@hpcc-js/wasm-graphviz`:
+  ```typescript
+  import { Graphviz } from "@hpcc-js/wasm-graphviz"
+  const graphviz = await Graphviz.load()
+  const svg = graphviz.dot(dotSource)
+  ```
+- Apply CSS classes to SVG nodes based on execution state:
+  - `.completed` → green fill
+  - `.running` → blue border, pulsing animation
+  - `.failed` → red fill
+  - `.retrying` → yellow border
+  - `.pending` → gray
+- Auto-refreshes on SSE `StageStarted`/`StageCompleted` events
+- Click a node → expand detail panel (outcome, duration, retries, output)
 
-- Past pipelines with outcome, duration
-- Filter by status
-- Success rate, avg duration
+**Event stream (bottom-right):**
+- `EventSource` connected to `/pipelines/:id/events`
+- Events append to Zustand store, rendered as scrollable list
+- Auto-scroll with pause toggle
+- Color coded: green=completed, red=failed, blue=started, yellow=retrying
+- Click event → expand details
 
-#### 4. Submit (/submit)
+**Human gate bar (bottom):**
+- Shows when `InterviewStarted` event received
+- Renders question text + choice buttons
+- `POST /pipelines/:id/questions/:qid/answer` on click
+- Auto-hides when answered
 
-- DOT source text area or file path
-- Project root, config overrides
-- POST /pipelines on submit
+#### 2. Pipeline Detail (`/pipelines/:id`)
+
+- Full graph SVG with execution state
+- Context values table (`GET /context`)
+- Checkpoint state (`GET /checkpoint`)
+- Node outcomes with durations + output
+- Complete event log
+
+#### 3. History (`/history`)
+
+- All completed pipelines
+- Filter by status (completed/failed/cancelled)
+- Stats: success rate, avg duration, total runs
+
+#### 4. Submit (`/submit`)
+
+- DOT source textarea (with syntax highlighting if possible)
+- Or file path input
+- Project root path
+- Config overrides (model, thresholds)
+- `POST /pipelines` on submit → redirect to dashboard
+
+### Client Implementation Notes
+
+**SSE hook:**
+```typescript
+const useSSE = (pipelineId: string) => {
+  useEffect(() => {
+    const source = new EventSource(`/pipelines/${pipelineId}/events`)
+    source.addEventListener("StageStarted", (e) => {
+      store.addEvent(JSON.parse(e.data))
+    })
+    source.addEventListener("StageCompleted", (e) => {
+      store.addEvent(JSON.parse(e.data))
+      refetchGraph() // re-render SVG with updated state
+    })
+    // ... other event types
+    return () => source.close()
+  }, [pipelineId])
+}
+```
+
+**Graph rendering hook:**
+```typescript
+const useDotGraph = (pipelineId: string) => {
+  const [svg, setSvg] = useState("")
+  const graphviz = useRef<Graphviz>()
+
+  useEffect(() => {
+    Graphviz.load().then(g => graphviz.current = g)
+  }, [])
+
+  const render = async () => {
+    const { dot, executionState } = await fetch(`/pipelines/${pipelineId}/graph`).then(r => r.json())
+    const styledDot = applyExecutionStyles(dot, executionState)
+    const svgStr = graphviz.current.dot(styledDot)
+    setSvg(svgStr)
+  }
+
+  return { svg, render }
+}
+```
+
+**State store (Zustand):**
+```typescript
+interface MonitorStore {
+  pipelines: Pipeline[]
+  selectedId: string
+  events: Map<string, PipelineEvent[]>
+  questions: Map<string, Question[]>
+  addEvent: (pipelineId: string, event: PipelineEvent) => void
+  selectPipeline: (id: string) => void
+}
+```
 
 ### Design
 
-- Dark theme (#0d1117, #161b22)
-- Monospace for code/context, sans-serif for UI
-- SVG graph is the centerpiece — large, prominent, auto-updating
-- Responsive
+- Dark theme: `#0d1117` background, `#161b22` cards, `#30363d` borders
+- Monospace: code, context values, DOT source
+- Sans-serif: UI chrome, labels, buttons
+- Graph node colors via CSS on SVG elements
+- Status colors: `#3fb950` green, `#f85149` red, `#58a6ff` blue, `#d29922` yellow, `#8b949e` gray
 
-## Event Types (§9.6)
+## Event Types (Attractor §9.6)
 
 ```typescript
 type PipelineEvent =
@@ -199,10 +346,16 @@ type PipelineEvent =
 
 ## Build Order
 
-1. HTTP Server — REST + SSE wrapping runPipeline()
-2. Graph renderer — dot -Tsvg with execution state styling
-3. UI scaffold — Vite + React + Tailwind + shadcn/ui
-4. Dashboard — Pipeline list + graph SVG + event stream + human gates
-5. Detail view — Context, checkpoint, outcomes, full log
-6. History — Past pipeline browser
-7. Submit — Form to start pipelines via REST
+1. **Server** — Hono HTTP server in `src/server/`, all REST + SSE endpoints, Interviewer integration
+2. **`arc serve` command** — add to CLI
+3. **Client scaffold** — Vite + React + Tailwind + shadcn/ui + WASM Graphviz
+4. **Dashboard** — pipeline list + DOT→SVG graph + SSE events + human gates
+5. **Detail view** — context, checkpoint, outcomes
+6. **History + Submit** — browse past runs, start new ones
+7. **Polish** — animations, responsive, error handling
+
+## Verification
+
+1. Server: `POST /pipelines` starts a mock pipeline, SSE streams events, `GET /graph` returns DOT + state
+2. Client: graph renders with correct node colors, events stream in real-time, human gate buttons work
+3. End-to-end: start pipeline from Submit page, watch it execute on Dashboard, answer human gate, see it complete
